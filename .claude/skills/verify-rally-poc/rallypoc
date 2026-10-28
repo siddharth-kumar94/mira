@@ -1,0 +1,769 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["httpx>=0.28", "playwright>=1.64"]
+# ///
+"""rallypoc: verify CLI for the Rally POC (project-verify-kit contract). Run from the repo root.
+
+Examples:
+  rallypoc doctor
+  rallypoc stack up                 # proxy on :8787, web on :5173, waits for health
+  rallypoc api GET /api/health --expect 200 --field ok
+  rallypoc browser install          # once: Chromium for Playwright
+  rallypoc browser run smoke        # one flow; `all` runs every flow
+  rallypoc test                     # pytest + vitest + typecheck
+  rallypoc seed                     # reset [DEMO] data in Rally (approved exception, see SKILL.md)
+  rallypoc cleanup
+
+Exit codes: 0 pass, 1 check failed, 2 usage or precondition error.
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+import httpx
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parents[2]
+PROXY = "http://127.0.0.1:8787"
+WEB = "http://127.0.0.1:5173"
+SERVICES = {
+    "server": {"cmd": ["uv", "run", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8787"],
+               "cwd": ROOT / "server", "port": 8787, "health": f"{PROXY}/api/health"},
+    "web": {"cmd": ["npm", "run", "dev"], "cwd": ROOT / "web", "port": 5173, "health": f"{WEB}/"},
+}
+NOT_APPLICABLE = {
+    "db": "no database: Rally is the record of truth",
+    "ci": "no CI is configured for the POC",
+    "aws": "nothing is deployed; the POC runs on one laptop",
+    "parity": "nothing is deployed, so there is nothing to mirror",
+}
+
+
+class Fail(Exception):
+    """A check failed (exit 1)."""
+
+
+class Usage(Exception):
+    """A usage or precondition error (exit 2). The message says how to fix it."""
+
+
+def instance(args) -> str:
+    return args.instance or os.environ.get("RALLY_POC_VERIFY_INSTANCE", "default")
+
+
+def state_dir(args) -> Path:
+    d = Path("/tmp/rally-poc-verify") / instance(args)
+    for sub in ("pids", "logs", "evidence"):
+        (d / sub).mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def echo(cmd) -> None:
+    print("+ " + (cmd if isinstance(cmd, str) else " ".join(map(str, cmd))), flush=True)
+
+
+def run(cmd, cwd=ROOT) -> int:
+    echo(cmd)
+    return subprocess.call(cmd, cwd=cwd)
+
+
+def record(args, check: str, result: str, evidence="", reason: str = "") -> None:
+    line = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "check": check,
+            "result": result, "evidence": str(evidence), "reason": reason}
+    with open(state_dir(args) / "evidence" / "results.jsonl", "a") as f:
+        f.write(json.dumps(line) + "\n")
+    print(f"{check}  {result}  {evidence}  {reason}".rstrip())
+
+
+def port_open(port: int) -> bool:
+    with socket.socket() as s:
+        s.settimeout(0.3)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def pid_of(args, name: str) -> int | None:
+    f = state_dir(args) / "pids" / f"{name}.pid"
+    if not f.exists():
+        return None
+    pid = int(f.read_text())
+    try:
+        os.kill(pid, 0)
+        return pid
+    except ProcessLookupError:
+        f.unlink()
+        return None
+
+
+def redact(body):
+    """Never echo credentials: replace any api_key value, at any depth, with ***."""
+    if isinstance(body, dict):
+        return {k: "***" if k == "api_key" else redact(v) for k, v in body.items()}
+    if isinstance(body, list):
+        return [redact(v) for v in body]
+    return body
+
+
+def api_call(method: str, path: str, body=None) -> tuple[int, object]:
+    echo(f"{method} {PROXY}{path}" + (f" {json.dumps(redact(body))}" if body is not None else ""))
+    try:
+        r = httpx.request(method, PROXY + path, json=body, timeout=60)
+    except httpx.HTTPError as e:
+        raise Usage(f"proxy not reachable ({e.__class__.__name__}); run `rallypoc stack up`")
+    try:
+        return r.status_code, r.json()
+    except ValueError:
+        return r.status_code, r.text
+
+
+def require_demo() -> None:
+    """Checks must never touch real work (spec §11): refuse unless the running proxy guards writes."""
+    status, s = api_call("GET", "/api/session")
+    if status != 200 or not isinstance(s, dict):
+        raise Usage(f"/api/session answered HTTP {status}; is the stack up?")
+    if s.get("write_guard") != "demo":
+        raise Usage("the proxy is running with the write guard off; run `rallypoc stack restart` (demo is the default)")
+    if not s.get("connected"):
+        raise Usage("the proxy isn't connected to Rally: " + str(s.get("error") or "no API key"))
+
+
+def pick(data, path: str):
+    cur = data
+    for part in path.replace("]", "").replace("[", ".").split("."):
+        if part:
+            cur = cur[int(part)] if isinstance(cur, list) else cur[part]
+    return cur
+
+
+# ---------- doctor ----------
+def cmd_doctor(args) -> None:
+    problems = []
+    for tool in ("uv", "node", "npm"):
+        if not shutil.which(tool):
+            problems.append(f"{tool} not found on PATH")
+    if shutil.which("node"):
+        node = subprocess.run(["node", "--version"], capture_output=True, text=True).stdout.strip()
+        print(f"node {node}")
+        if int(node.lstrip("v").split(".")[0]) < 22:
+            problems.append(f"node {node} is older than 22")
+    env = ROOT / ".env"
+    if not env.exists():
+        problems.append("no .env: copy .env.example to .env and fill RALLY_API_KEY, RALLY_WORKSPACE, RALLY_PROJECT")
+    else:
+        keys = {line.split("=", 1)[0] for line in env.read_text().splitlines() if "=" in line and not line.startswith("#")}
+        problems += [f".env is missing {k}" for k in ("RALLY_API_KEY", "RALLY_WORKSPACE", "RALLY_PROJECT") if k not in keys]
+    if not (ROOT / "web" / "node_modules").exists():
+        problems.append("web/node_modules missing: cd web && npm install")
+    for name, svc in SERVICES.items():
+        ours = pid_of(args, name)
+        state = "UP (this instance)" if ours else ("BUSY (not this instance)" if port_open(svc["port"]) else "free")
+        print(f"port {svc['port']} ({name}): {state}")
+        if state.startswith("BUSY"):
+            problems.append(f"port {svc['port']} is used by another process or instance; leave it alone")
+    for p in problems:
+        print(f"problem: {p}")
+    if problems:
+        raise Usage(f"{len(problems)} problem(s) above")
+    print("doctor: ok")
+
+
+# ---------- stack ----------
+def wait_http(url: str, timeout: float, name: str) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            if httpx.get(url, timeout=2).status_code < 500:
+                print(f"{name}: healthy ({url})")
+                return
+        except httpx.HTTPError:
+            pass
+        time.sleep(0.5)
+    raise Fail(f"{name} did not become healthy at {url}; see `rallypoc stack logs`")
+
+
+def stack_up(args) -> None:
+    d = state_dir(args)
+    mode = getattr(args, "write_guard", "demo") or "demo"
+    for name, svc in SERVICES.items():
+        if pid_of(args, name):
+            print(f"{name}: already up")
+            continue
+        if port_open(svc["port"]):
+            raise Usage(f"port {svc['port']} is busy and not ours; run `rallypoc doctor`")
+        log_path = d / "logs" / f"{name}.log"
+        env = {**os.environ, "WRITE_GUARD": mode} if name == "server" else None
+        echo(f"(cd {svc['cwd'].relative_to(ROOT)} && {'WRITE_GUARD=' + mode + ' ' if env else ''}{' '.join(svc['cmd'])}) >> {log_path}")
+        with open(log_path, "ab") as log:
+            p = subprocess.Popen(svc["cmd"], cwd=svc["cwd"], stdout=log, stderr=subprocess.STDOUT,
+                                 start_new_session=True, env=env)
+        (d / "pids" / f"{name}.pid").write_text(str(p.pid))
+    for name, svc in SERVICES.items():
+        wait_http(svc["health"], 90, name)
+    print(f"stack: up (write guard {mode})")
+
+
+def stack_down(args) -> None:
+    for name in SERVICES:
+        pid = pid_of(args, name)
+        if not pid:
+            print(f"{name}: not running (this instance)")
+            continue
+        echo(f"kill -TERM -{pid}")
+        os.killpg(pid, signal.SIGTERM)
+        for _ in range(40):
+            try:
+                os.kill(pid, 0)
+                time.sleep(0.25)
+            except ProcessLookupError:
+                break
+        (state_dir(args) / "pids" / f"{name}.pid").unlink(missing_ok=True)
+        print(f"{name}: stopped")
+
+
+def stack_status(args) -> None:
+    unhealthy = 0
+    for name, svc in SERVICES.items():
+        pid = pid_of(args, name)
+        healthy = False
+        if pid:
+            try:
+                healthy = httpx.get(svc["health"], timeout=2).status_code < 500
+            except httpx.HTTPError:
+                pass
+        print(f"{name}: {'UP' if pid else 'DOWN'}{' healthy' if healthy else ''}")
+        unhealthy += 0 if healthy else 1
+    if unhealthy:
+        raise Fail(f"{unhealthy} service(s) not healthy")
+
+
+def stack_logs(args) -> None:
+    for name in [args.service] if args.service else list(SERVICES):
+        f = state_dir(args) / "logs" / f"{name}.log"
+        print(f"==> {f}")
+        if f.exists():
+            print("\n".join(f.read_text(errors="replace").splitlines()[-args.lines:]))
+
+
+def cmd_stack(args) -> None:
+    if args.action == "restart":
+        stack_down(args)
+        stack_up(args)
+        return
+    {"up": stack_up, "down": stack_down, "status": stack_status, "logs": stack_logs}[args.action](args)
+
+
+# ---------- api ----------
+def cmd_api(args) -> None:
+    try:
+        body = json.loads(args.json) if args.json else None
+    except ValueError as e:
+        raise Usage(f"--json is not valid JSON ({e})")
+    if args.method.upper() != "GET":
+        require_demo()  # spec D20: the verify CLI never writes unless the proxy guards writes
+    deadline = time.time() + args.timeout
+    while True:
+        status, data = api_call(args.method, args.path, body)
+        try:
+            value = pick(data, args.field) if args.field else data
+        except (KeyError, IndexError, TypeError, ValueError):
+            value = None
+        ok = (args.expect is None or status == args.expect) and (
+            args.until is None or str(value) == args.until or json.dumps(value) == args.until)
+        if ok or args.until is None or time.time() > deadline:
+            break
+        time.sleep(1)
+    print(f"HTTP {status}")
+    print(value[:6000] if isinstance(value, str) else json.dumps(value, indent=1)[:6000])
+    if args.save:
+        out = state_dir(args) / "evidence" / f"{args.save}.json"
+        out.write_text(json.dumps(data, indent=1))
+        print(f"saved {out}")
+    if not ok:
+        raise Fail(f"expected status {args.expect}" + (f" and {args.field} == {args.until}" if args.until else ""))
+
+
+# ---------- browser ----------
+def cmd_browser(args) -> None:
+    if args.action == "install":
+        if run([sys.executable, "-m", "playwright", "install", "chromium"]) != 0:
+            raise Fail("playwright install failed")
+        return
+    require_demo()
+    if args.action == "snapshot" and not args.target.startswith("/"):
+        raise Usage("snapshot needs a URL path starting with /")
+    from playwright.sync_api import sync_playwright
+
+    sys.path.insert(0, str(HERE))
+    import flows
+
+    ev = state_dir(args) / "evidence"
+    with sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+        except Exception as e:  # noqa: BLE001 - any launch failure means the browser is missing
+            raise Usage(f"Chromium for Playwright is not installed ({e.__class__.__name__}); run `rallypoc browser install`")
+        try:
+            if args.action == "snapshot":
+                page = browser.new_page(viewport={"width": 1280, "height": 800})
+                echo(f"goto {flows.WEB}{args.target}")
+                page.goto(flows.WEB + args.target)
+                page.wait_for_load_state("networkidle")
+                slug = args.target.strip("/").replace("/", "-") or "root"
+                page.screenshot(path=str(ev / f"snapshot-{slug}.png"))
+                (ev / f"snapshot-{slug}.aria.yaml").write_text(page.locator("body").aria_snapshot())
+                print(f"saved {ev / f'snapshot-{slug}.png'} and .aria.yaml")
+                return
+            names = list(flows.FLOWS) if args.target == "all" else [args.target]
+            unknown = [n for n in names if n not in flows.FLOWS]
+            if unknown:
+                raise Usage(f"unknown flow {unknown[0]!r}; flows: {', '.join(flows.FLOWS)}")
+            failed = 0
+            for name in names:
+                page = browser.new_page(viewport={"width": 1280, "height": 800})
+                shot = ev / f"flow-{name}.png"
+                echo(f"flow {name}")
+                try:
+                    flows.FLOWS[name](page)
+                    result, reason = "PASS", ""
+                except Exception as e:  # noqa: BLE001 - report every failure as FAIL with its first line
+                    result, reason = "FAIL", f"{e.__class__.__name__}: {str(e).splitlines()[0][:200] if str(e) else ''}"
+                    failed += 1
+                page.screenshot(path=str(shot))
+                page.close()
+                record(args, f"browser:{name}", result, shot, reason)
+            if failed:
+                raise Fail(f"{failed} flow(s) failed")
+        finally:
+            browser.close()
+
+
+# ---------- test / seed / evidence / cleanup / report ----------
+def cmd_test(args) -> None:
+    steps = [(["uv", "run", "pytest", "-q"], ROOT / "server"),
+             (["npx", "vitest", "--run"], ROOT / "web"),
+             (["npm", "run", "typecheck"], ROOT / "web")]
+    failed = 0
+    for cmd, cwd in steps:
+        code = run(cmd, cwd)
+        record(args, "test:" + " ".join(cmd), "PASS" if code == 0 else "FAIL")
+        failed += code != 0
+    if failed:
+        raise Fail(f"{failed} test step(s) failed")
+
+
+def cmd_seed(args) -> None:
+    print("seed writes only [DEMO] items tagged collabathon-demo in RALLY_PROJECT (approved exception, see SKILL.md)")
+    if run(["uv", "run", "--quiet", "--script", "scripts/seed_demo.py"]) != 0:
+        raise Fail("seed failed")
+
+
+def cmd_evidence(args) -> None:
+    ev = state_dir(args) / "evidence"
+    if args.action == "dir":
+        print(ev)
+    else:
+        for f in sorted(ev.iterdir()):
+            print(f"{f.stat().st_size:>9}  {f}")
+
+
+def cmd_cleanup(args) -> None:
+    stack_down(args)
+    print(f"evidence kept at {state_dir(args) / 'evidence'}")
+
+
+def cmd_report(args) -> None:
+    f = state_dir(args) / "evidence" / "results.jsonl"
+    rows = [json.loads(line) for line in f.read_text().splitlines()] if f.exists() else []
+    latest: dict[str, dict] = {}
+    for r in rows:
+        latest[r["check"]] = r
+    sha = subprocess.run(["git", "rev-parse", "--short=12", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    fails = [r for r in latest.values() if r["result"] == "FAIL"]
+    verdict = "FAIL" if fails else ("PASS" if latest else "PARTIAL")
+    print(f"1. **Verdict**: {verdict} at {sha}, platform {sys.platform}, instance {instance(args)}\n")
+    print("2. **Checks**\n\n| check | result | evidence | reason |\n|---|---|---|---|")
+    for r in latest.values():
+        print(f"| {r['check']} | {r['result']} | {r['evidence']} | {r['reason']} |")
+    print("\n3. **Deployed-environment differences**: nothing is deployed. The POC talks to the real Rally workspace "
+          "directly, so Rally behaviour is the real thing, and multi-user hosting is untested (spec §13).")
+    print("4. **Findings**: <ranked blocker / should-fix / nit with file:line>")
+    print("5. **Needs the user**: <approvals, expired API key, decisions>")
+
+
+# ---------- check ----------
+DEMO_STORY = "[DEMO] Story editor with HTML round-trip"     # seeded: Defined, in the current sprint
+DEMO_BACKLOG = "[DEMO] Backlog drag-to-rank"                 # seeded: Defined, no sprint, Ready off
+
+
+def _demo_ids(issues: list[dict], prefix: str, tag: str) -> set[int]:
+    return {i["id"] for i in issues if i["title"].startswith(prefix) and tag in i["labels"]}
+
+
+RAW_PI_NAME = re.compile(r"\b\d{4}\s*PI\s*\d|\bPI\s*\d+\s*\d{4}\b", re.IGNORECASE)   # "2026 PI4 Sprint 7 ..." as Rally spells it
+CYCLE_NAME = re.compile(r"^PI \d+ \u00b7 (Sprint \d+|IP Sprint)$")                            # D30's rewrite
+
+
+def current_cycle(cycles: list[dict], now: str) -> dict | None:
+    return next((c for c in cycles if c["start"] <= now < c["end"]), None)
+
+
+def phase4_checks(b: dict, demo_team: int, prefix: str, verdict, skip, create_then_delete) -> None:
+    """Phase 4 live checks: cycles, projects, initiatives, portfolio writes on [DEMO] items only, connect."""
+    now = b["server_time"]
+    teams = {t["id"]: t for t in b["teams"]}
+
+    def cycles_of(team_id: int) -> dict | None:
+        s, got = api_call("GET", f"/api/teams/{team_id}/cycles")
+        return got if s == 200 and isinstance(got, dict) else None
+
+    listing = cycles_of(demo_team)
+    cur = current_cycle(listing["cycles"], now) if listing else None
+    with_stats = {s["cycle_id"] for s in listing["stats"]} if listing else set()
+    verdict("cycles-read", bool(cur) and all(c["id"] in with_stats for c in listing["cycles"]),
+            f"{len(listing['cycles']) if listing else 0} cycles, current {cur['name'] if cur else None}",
+            "the demo team's cycles did not load" if not listing else
+            "no current cycle" if not cur else f"cycles without stats: {[c['name'] for c in listing['cycles'] if c['id'] not in with_stats]}")
+
+    if cur:
+        s, detail = api_call("GET", f"/api/teams/{demo_team}/cycles/{cur['id']}")
+        demo_issues = [i["key"] for i in detail["issues"] if i["title"].startswith(prefix)] if s == 200 else []
+        verdict("cycle-detail-read", s == 200 and len(demo_issues) >= 1, f"{cur['name']}: {len(demo_issues)} [DEMO] issues",
+                f"HTTP {s}; no [DEMO] issue in the current cycle, run `rallypoc seed`")
+    else:
+        verdict("cycle-detail-read", False, "", "no current cycle to read")
+
+    arts = [t for t in b["teams"] if t["level"] == "art"]
+    if not arts:
+        skip("cycle-detail-art", "no ART in your teams")
+    else:
+        art = arts[0]
+        art_cycles = cycles_of(art["id"])
+        art_cur = current_cycle(art_cycles["cycles"], now) if art_cycles else None
+        if art_cur is None:
+            verdict("cycle-detail-art", False, "", f"{art['name']} has no current cycle")
+        else:
+            s, detail = api_call("GET", f"/api/teams/{art['id']}/cycles/{art_cur['id']}")
+            children = {t["id"] for t in detail.get("teams", []) if t["parent_id"] == art["id"]} if s == 200 else set()
+            kids = [i for i in detail.get("issues", []) if i["team_id"] in children] if s == 200 else []
+            verdict("cycle-detail-art", s == 200 and len(kids) >= 1, f"{art['name']}: {len(kids)} issues of child teams",
+                    f"HTTP {s}; no issue belongs to a child team (children {sorted(children)})")
+
+    others = [t for t in b["teams"] if t["id"] != demo_team]
+    names: list[str] = [c["name"] for c in listing["cycles"]] if listing else []
+    if others and (real := cycles_of(others[0]["id"])):
+        names += [c["name"] for c in real["cycles"]]
+    raw = sorted({n for n in names if not CYCLE_NAME.match(n) and RAW_PI_NAME.search(n)})
+    verdict("cycle-names", bool(names) and not raw, f"{len(names)} cycle names", f"raw Rally names shown: {raw}" if raw else "no cycles to check")
+
+    team_ids = ",".join(str(t) for t in teams)
+    s, plist = api_call("GET", f"/api/projects?teams={demo_team}")
+    projects = plist.get("projects", []) if s == 200 else []
+    demo_projects = [p for p in projects if p["name"].startswith(prefix)]
+    verdict("projects-read", s == 200 and len(demo_projects) >= 2, f"{len(projects)} projects, {len(demo_projects)} [DEMO]",
+            f"HTTP {s}; expected the two [DEMO] features, run `rallypoc seed`")
+    s, ilist = api_call("GET", f"/api/initiatives?teams={demo_team}")
+    demo_inits = [i for i in ilist.get("initiatives", []) if i["name"].startswith(prefix)] if s == 200 else []
+    verdict("initiatives-read", s == 200 and len(demo_inits) >= 1, f"{len(demo_inits)} [DEMO] initiatives",
+            f"HTTP {s}; expected the [DEMO] capability, run `rallypoc seed`")
+
+    s, every = api_call("GET", f"/api/projects?teams={team_ids}")
+    if s != 200:
+        verdict("pi-chips", False, "", f"HTTP {s}")
+    else:
+        known = {i for r in every["releases"] for i in [r["id"], *r["ids"]]}
+        missing = sorted({p["pi_id"] for p in every["projects"] if p["pi_id"] is not None and p["pi_id"] not in known})
+        verdict("pi-chips", not missing, f"{sum(p['pi_id'] is not None for p in every['projects'])} projects with a PI, {len(every['releases'])} releases",
+                f"pi_id with no release: {missing}")
+
+    feature = next((p for p in demo_projects if "Linear-style" in p["name"]), demo_projects[0] if demo_projects else None)
+    if feature is None:
+        verdict("project-comment-round-trip", False, "", "no [DEMO] project to comment on")
+    else:
+        create_then_delete("project-comment-round-trip", f"/api/projects/{feature['key']}/comments",
+                           {"html": "<p>[DEMO] check api project comment</p>"}, lambda c: f"/api/comments/{c['id']}", "comment")
+
+    if not b.get("project_priority"):
+        skip("pm-priority", "no portfolio priority field in this workspace")
+    elif feature is None:
+        verdict("pm-priority", False, "", "no [DEMO] project")
+    else:
+        path, seen, restored = f"/api/projects/{feature['key']}", [], False
+        try:
+            s, got = api_call("PATCH", path, {"priority": 2})
+            seen.append(f"High->{got.get('priority') if isinstance(got, dict) else s}")
+            ok = s == 200 and got["priority"] == 2
+            s422, _ = api_call("PATCH", path, {})
+            ok = ok and s422 == 422
+        finally:
+            for _ in range(2):  # Rally is shared: try twice to put it back
+                try:
+                    s, back = api_call("PATCH", path, {"priority": feature["priority"]})
+                    restored = s == 200 and back["priority"] == feature["priority"]
+                except (Usage, httpx.HTTPError):
+                    restored = False
+                if restored:
+                    break
+        verdict("pm-priority", restored and ok, "; ".join(seen), "left modified: priority not restored" if not restored else "priority or 422 wrong")
+
+    # An obviously invalid key only. The proxy must refuse it and keep the session it had.
+    s, body = api_call("POST", "/api/session", {"api_key": "not-a-key"})
+    s2, session = api_call("GET", "/api/session")
+    message = body.get("error") if isinstance(body, dict) else body
+    verdict("connect-invalid", s == 401 and "Rally rejected that key" in str(message) and s2 == 200 and session.get("connected") is True,
+            f"HTTP {s} {message!r}; still connected={session.get('connected') if isinstance(session, dict) else None}",
+            f"expected 401 'Rally rejected that key' and a session that stays connected; got {s} {body!r}, session {session!r}")
+
+
+def check_api(args) -> None:
+    """Spec §12 live checks. Writes touch only [DEMO] items, with the guard on, and every one is put back."""
+    require_demo()
+    failed = 0
+
+    def verdict(name: str, ok: bool, evidence="", reason: str = "") -> None:
+        nonlocal failed
+        record(args, f"api:{name}", "PASS" if ok else "FAIL", evidence, "" if ok else reason)
+        failed += not ok
+
+    status, b = api_call("GET", "/api/bootstrap")
+    if status != 200:
+        raise Fail(f"bootstrap returned HTTP {status}: {b}")
+    saved = state_dir(args) / "evidence" / "check-api-bootstrap.json"
+    saved.write_text(json.dumps(b, indent=1))
+    prefix, tag, demo_team = b["demo_prefix"], b["demo_tag"], b["demo_team_id"]
+    demo = _demo_ids(b["issues"], prefix, tag)
+    verdict("bootstrap-demo", len(demo) >= 8, saved, f"{len(demo)} [DEMO] issues assigned to you; expected 8 — run `rallypoc seed`")
+    others = [t for t in b["teams"] if t["id"] != demo_team]
+    verdict("bootstrap-teams", demo_team in {t["id"] for t in b["teams"]} and len(others) >= 1,
+            f"{len(b['teams'])} teams", f"your teams: {[t['name'] for t in b['teams']]}")
+
+    if others:  # read-only: a real team loads (spec §12 "Real AI/ML issues load")
+        s, load = api_call("GET", f"/api/teams/{others[0]['id']}")
+        verdict("team-load-real", s == 200 and len(load.get("issues", [])) > 0,
+                f"{others[0]['name']}: {len(load.get('issues', [])) if s == 200 else s} issues", f"HTTP {s}")
+
+    real = next((i for i in b["issues"] if i["id"] not in demo), None)
+    if real is None:
+        record(args, "api:guard-blocks-real", "SKIP", "", "no non-demo issue is assigned to you")
+    else:
+        # A no-op patch (same estimate): even if the guard were broken, Rally would see no change.
+        s, body = api_call("PATCH", f"/api/issues/{real['id']}", {"estimate": real["estimate"]})
+        verdict("guard-blocks-real", s == 403, f"HTTP {s}", f"expected 403, got {s}: {body}")
+
+    s, team = api_call("GET", f"/api/teams/{demo_team}")
+    if s != 200:
+        raise Fail(f"demo team load returned HTTP {s}: {team}")
+    by_title = {i["title"]: i for i in team["issues"]}
+    story, backlog = by_title.get(DEMO_STORY), by_title.get(DEMO_BACKLOG)
+    if not story or not backlog:
+        raise Fail(f"seeded stories missing ({DEMO_STORY!r}, {DEMO_BACKLOG!r}); run `rallypoc seed`")
+
+    def round_trip(name: str, issue: dict, steps: list[dict], restore: dict, check, restored_ok=lambda got: True) -> None:
+        path = f"/api/issues/{issue['id']}"
+        seen: list[str] = []
+        ok = True
+        try:
+            for patch in steps:
+                s, got = api_call("PATCH", path, patch)
+                good = s == 200 and check(patch, got)
+                seen.append(f"{patch}->{got.get('status') if isinstance(got, dict) else s}")
+                ok = ok and good
+        finally:
+            restored = False
+            for _ in range(2):  # Rally is shared: always try twice to put it back
+                try:
+                    s, got = api_call("PATCH", path, restore)
+                    restored = s == 200 and isinstance(got, dict) and restored_ok(got)
+                except (Usage, httpx.HTTPError):
+                    restored = False
+                if restored:
+                    break
+        if not restored:
+            verdict(name, False, "", f"left modified: {issue['title']} — restore {restore} failed")
+        else:
+            verdict(name, ok, "; ".join(seen), "a step returned the wrong value")
+
+    statuses = ["todo", "in_progress", "in_review", "done", "backlog"]
+    round_trip("status-round-trip", backlog, [{"status": st} for st in statuses],
+               {"status": backlog["status"]}, lambda p, got: got["status"] == p["status"])
+    round_trip("backlog-todo-via-ready", backlog, [{"status": "todo"}, {"status": "backlog"}],
+               {"status": "backlog"}, lambda p, got: got["status"] == p["status"] and got["cycle_id"] is None)
+    round_trip("priority-round-trip", story, [{"priority": 2}, {"priority": 0}],
+               {"priority": story["priority"]}, lambda p, got: got["priority"] == p["priority"])
+
+    # The proxy unescapes the HTML-escaped tag names Rally returns (e.g. "&#39;API"), so those round-trip too.
+    def usable(n: str) -> bool:
+        return n != tag
+
+    label = next((lbl for i in team["issues"] + b["issues"] for lbl in i["labels"] if usable(lbl)), None)
+    if label is None:  # not on any loaded issue: any existing Rally tag will do
+        s, names = api_call("GET", "/api/labels?q=")
+        label = next((n for n in names if usable(n)), None) if s == 200 and isinstance(names, list) else None
+    if label is None:
+        record(args, "api:label-round-trip", "SKIP", "", "Rally has no label other than the demo label")
+    else:
+        round_trip("label-round-trip", story, [{"labels": story["labels"] + [label]}],
+                   {"labels": story["labels"]}, lambda p, got: label in got["labels"],
+                   restored_ok=lambda got: label not in got["labels"])
+
+    def create_then_delete(name: str, post_path: str, body: dict, delete_path, what: str) -> None:
+        """Always try to delete what the check created; FAIL if it could not be removed."""
+        s, made = api_call("POST", post_path, body)
+        if s != 201:
+            verdict(name, False, "", f"create HTTP {s}: {made}")
+            return
+        d = None
+        for _ in range(2):  # Rally is shared: try twice to clean up
+            try:
+                d, _ = api_call("DELETE", delete_path(made))
+            except (Usage, httpx.HTTPError):
+                d = None
+            if d == 200:
+                break
+        if d != 200:
+            verdict(name, False, "", f"left behind: {what} {made['id']} ({made.get('key', '')}); delete HTTP {d}")
+        else:
+            verdict(name, True, f"created {made.get('key') or made['id']}, deleted HTTP {d}")
+
+    create_then_delete("comment-round-trip", f"/api/issues/{story['id']}/comments",
+                       {"html": "<p>[DEMO] check api comment</p>"}, lambda c: f"/api/comments/{c['id']}", "comment")
+    create_then_delete("sub-issue-round-trip", f"/api/issues/{story['id']}/sub-issues",
+                       {"title": "[DEMO] check api sub-issue", "hours": 1}, lambda x: f"/api/sub-issues/{x['id']}", "sub-issue")
+
+    s, projects = api_call("GET", f"/api/projects?teams={demo_team}")
+    project = next((p for p in projects.get("projects", []) if p["name"].startswith(prefix)), None) if s == 200 else None
+    if project is None:
+        verdict("update-round-trip", False, "", f"no [DEMO] project in the demo team (HTTP {s})")
+    else:
+        s, update = api_call("POST", f"/api/projects/{project['key']}/updates", {"health": "at_risk", "html": "<p>[DEMO] check api</p>"})
+        shown, d = None, None
+        try:
+            if s == 201:
+                _, after = api_call("GET", f"/api/projects?teams={demo_team}")
+                shown = next((p["health"] for p in after["projects"] if p["id"] == project["id"]), None)
+        finally:
+            if s == 201:
+                for _ in range(2):  # Rally is shared: try twice to clean up
+                    try:
+                        d, _ = api_call("DELETE", f"/api/comments/{update['id']}")
+                    except (Usage, httpx.HTTPError):
+                        d = None
+                    if d == 200:
+                        break
+        if s != 201:
+            verdict("update-round-trip", False, "", f"post HTTP {s}: {update}")
+        elif d != 200:
+            verdict("update-round-trip", False, "", f"left behind: update {update['id']}; delete HTTP {d}")
+        else:
+            _, final = api_call("GET", f"/api/projects?teams={demo_team}")
+            latest = next((((p.get("latest_update") or {}).get("id")) for p in final["projects"] if p["id"] == project["id"]), None)
+            ok = isinstance(shown, dict) and shown.get("value") == "at_risk" and shown.get("source") == "update" and latest != update["id"]
+            verdict("update-round-trip", ok, f"health after posting: {shown}; deleted HTTP {d}; latest update after delete: {latest}",
+                    f"health {shown}, delete HTTP {d}, latest update id after delete {latest} (posted {update['id']})")
+
+    team_backlog = sorted((i for i in team["issues"] if i["status"] == "backlog"), key=lambda i: i["rank"])
+    demo_backlog = [i for i in team_backlog if i["id"] in _demo_ids(team["issues"], prefix, tag)]
+    if len(demo_backlog) < 2:
+        verdict("rank-round-trip", False, "", "need two [DEMO] backlog stories; run `rallypoc seed`")
+    else:
+        first, last = demo_backlog[0], demo_backlog[-1]
+        everything = sorted(team["issues"], key=lambda i: i["rank"])
+        neighbor = everything[everything.index(last) - 1]
+        s1 = s2 = None
+        moved = restored = False
+        try:
+            s1, got = api_call("POST", f"/api/issues/{last['id']}/rank", {"above": first["id"]})
+            moved = s1 == 200 and got["rank"] < first["rank"]
+        finally:
+            try:
+                s2, back = api_call("POST", f"/api/issues/{last['id']}/rank", {"below": neighbor["id"]})
+                restored = s2 == 200 and back["rank"] > neighbor["rank"]
+            except (Usage, httpx.HTTPError):
+                restored = False
+        if not restored:
+            verdict("rank-round-trip", False, "", f"left reordered: {last['key']} may not be back below {neighbor['key']}")
+        else:
+            verdict("rank-round-trip", moved, f"moved={moved} restored={restored}", f"HTTP {s1}/{s2}")
+    phase4_checks(b, demo_team, prefix, verdict, lambda name, reason: record(args, f"api:{name}", "SKIP", "", reason), create_then_delete)
+    if failed:
+        raise Fail(f"{failed} API check(s) failed")
+
+
+def check_ui(args) -> None:
+    """Spec §9.1: drive every Playwright flow and save a screenshot of each."""
+    args.action, args.target = "run", "all"
+    cmd_browser(args)
+
+
+CHECKS = {"api": check_api, "ui": check_ui}
+
+
+def cmd_check(args) -> None:
+    CHECKS[args.what](args)
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(prog="rallypoc", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--instance", help="names this run (default: $RALLY_POC_VERIFY_INSTANCE or 'default')")
+    sub = p.add_subparsers(dest="command", required=True)
+    sub.add_parser("doctor", help="check tools, ports and .env").set_defaults(fn=cmd_doctor)
+    s = sub.add_parser("stack", help="start/stop the proxy and web dev server", epilog="example: rallypoc stack up")
+    s.add_argument("action", choices=["up", "down", "status", "logs", "restart"])
+    s.add_argument("--service", choices=list(SERVICES))
+    s.add_argument("--lines", type=int, default=50)
+    s.add_argument("--write-guard", choices=["demo", "off"], default="demo",
+                   help="demo (default) limits writes to [DEMO] items; off is for live use only. Checks refuse to run with off")
+    s.set_defaults(fn=cmd_stack)
+    a = sub.add_parser("api", help="call the proxy",
+                       epilog="examples: rallypoc api GET /api/bootstrap --expect 200 --field me.name\n"
+                              "          rallypoc api GET /api/health --until true --field ok")
+    a.add_argument("method", choices=["GET", "POST", "PATCH", "DELETE"])
+    a.add_argument("path")
+    a.add_argument("--json", help="request body as JSON")
+    a.add_argument("--expect", type=int, help="expected HTTP status")
+    a.add_argument("--field", help="dotted path to print/compare, e.g. issues[0].name")
+    a.add_argument("--until", help="poll until --field equals this value")
+    a.add_argument("--timeout", type=float, default=30)
+    a.add_argument("--save", help="save the response to evidence/<name>.json")
+    a.set_defaults(fn=cmd_api)
+    b = sub.add_parser("browser", help="Playwright flows and snapshots",
+                       epilog="examples: rallypoc browser run all | rallypoc browser snapshot / | rallypoc browser install")
+    b.add_argument("action", choices=["run", "snapshot", "install"])
+    b.add_argument("target", nargs="?", default="all", help="flow name or 'all' (run); URL path (snapshot)")
+    b.set_defaults(fn=cmd_browser)
+    sub.add_parser("test", help="pytest + vitest + typecheck").set_defaults(fn=cmd_test)
+    sub.add_parser("seed", help="create or reset the [DEMO] data in Rally").set_defaults(fn=cmd_seed)
+    c = sub.add_parser("check", help="the spec's live checks (§9.1)", epilog="examples: rallypoc check api")
+    c.add_argument("what", choices=list(CHECKS))
+    c.set_defaults(fn=cmd_check)
+    e = sub.add_parser("evidence", help="where evidence lives")
+    e.add_argument("action", choices=["dir", "list"])
+    e.set_defaults(fn=cmd_evidence)
+    sub.add_parser("cleanup", help="stop this instance's processes; keep evidence").set_defaults(fn=cmd_cleanup)
+    sub.add_parser("report", help="print the report skeleton with latest results").set_defaults(fn=cmd_report)
+    for name, reason in NOT_APPLICABLE.items():
+        n = sub.add_parser(name, help=f"not applicable: {reason}")
+        n.add_argument("rest", nargs="*")
+        n.set_defaults(fn=lambda _args, r=reason: print(f"not applicable: {r}"))
+    args = p.parse_args(argv)
+    try:
+        args.fn(args)
+        return 0
+    except Fail as e:
+        print(f"FAIL: {e}", file=sys.stderr)
+        return 1
+    except Usage as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

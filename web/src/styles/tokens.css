@@ -1,0 +1,168 @@
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-weight-normal: 450;
+  --font-weight-medium: 500;
+  --text-mini: 12px;
+  --text-small: 13px;
+  --text-regular: 15px;
+  --text-regular--line-height: 24px;
+  --text-title: 24px;
+
+  --color-app: #efeff0;
+  --color-panel: lch(98% 0.5 282);
+  --color-surface: lch(100% 0 282);
+  --color-hover: lch(94.4% 0.5 282);
+  --color-selected: lch(89.5% 0.5 282);
+  --color-ink-1: lch(10% 0 282);
+  --color-ink-2: lch(20% 1.25 282);
+  --color-ink-3: lch(39% 1.25 282);
+  --color-ink-4: lch(65% 1.25 282);
+  --color-line-1: lch(95% 0 282);
+  --color-line-2: lch(88% 0 282);
+  --color-line-3: lch(84% 0 282);
+  --color-focus: #6d78d5;
+  --color-status-backlog: lch(70.3% 3.6 260.6);
+  --color-status-todo: lch(68% 0 282);
+  --color-status-progress: lch(80% 90 85);
+  --color-status-review: rgb(15 157 88);
+  --color-status-done: lch(48% 59.3 288.4);
+  --color-status-completed: lch(37.8% 1.25 282);
+  --color-urgent: lch(66% 80 48);
+  --color-blocked: lch(55% 70 30);
+  --color-priority: lch(39.2% 1.25 282);
+  --color-line-menu: lch(91.9% 0 282);
+  --color-line-caret: lch(80.9% 0 282);
+  --color-highlight: lch(95% 0 282);
+  --color-tab-active: lch(93.5% 0.5 282);
+  --color-pill-on: lch(94.857% 0 282);
+  --color-tab-on: lch(95.543% 0 282);
+  --color-sidebar-hover: lch(91.6% 0.5 282);
+  --color-accent: lch(53% 52.26 286.91);
+  --color-accent-ink: lch(100% 5 287);
+  --color-switch-off: lch(82.5% 0.05 282);
+  /* Phase 4 (spec §19.2, inventory-p4 §8.13). fill-open, seg-active and shadow-popover are pill-on, tab-on and shadow-menu (ruling 1). */
+  --color-line-popover: lch(90.55% 0 282);
+  --color-fill-tag: lch(92.44% 0 282);
+  /* The cycle panel's status and date pills (inventory-p4 §4.2, cycle-points.json). */
+  --color-fill-cycle: lch(94.5% 0 282);
+  /* Settings link rows' 32px icon tile (inventory-p4 §5.3, settings-team-points.json). */
+  --color-fill-tile: lch(94.5% 0 282);
+  --color-hover-soft: lch(96.5% 0 282);
+  --color-line-grid: lch(95.24% 0 282);
+  --color-line-frame: lch(89.84% 0 282);
+  /* Settings nav items, section labels and the Back pill (inventory-p4 §5.1, settings-points.json). */
+  --color-ink-nav: lch(37.78% 1.25 282);
+  /* Health colours are Linear's computed values (inventory-p4 json); don't re-derive them from screenshot pixels. */
+  --color-health-on: lch(60% 64.37 141.95);
+  --color-health-risk: lch(72% 90 85);
+  --color-health-risk-icon: lch(80% 90 85);
+  --color-health-off: lch(50% 73 29);
+  --color-health-hover: lch(64.64% 0 282 / 0.125);
+  --color-overrun: lch(58% 73 29);
+  --color-chart-scope: lch(66% 1 282);
+  --color-chart-done: lch(48% 59.31 288.43);
+  /* The burn-up (inventory-p4 §2.3, §4.1): the today line, the weekly guides and the weekend hatch's stripes (cycles.png, rgb 222). */
+  --color-chart-today: lch(86.5% 0 282);
+  --color-chart-guide: lch(94.5% 0 282);
+  --color-chart-hatch: lch(88.5% 0 282);
+  --color-project-backlog: lch(67.969% 62.082 61.651);
+  --color-project-planned: lch(67.97% 1.61 272);
+  /* The projects board's column fill: rgb 245 (lch 96.7) at the top, fading toward the panel (projects-board.png, measured). */
+  --color-board-column: lch(96.7% 0.5 282);
+  /* The projects timeline (inventory-p4 §1.6, measured live 2026-10-19): Month/Week weekend columns, the today line's
+     faded foot, the overrun's pink gradient, a hovered bar's border, and the Today/Zoom pills' hover. */
+  --color-weekend: lch(89.44% 0.5 282 / 0.175);
+  --color-today-fade: lch(90% 8 282);
+  --color-overrun-from: color(srgb 0.97488 0.943035 0.94752);
+  --color-overrun-to: color(srgb 0.973735 0.909548 0.914665);
+  --color-line-bar-hover: lch(0% 0 0 / 0.15);
+  --color-pill-hover: lch(95.883% 0.157 282);
+  /* Mira's own PI and cycle bands (D37; Linear has none): a faint accent, and lighter grey for cycles. */
+  --color-band-pi: lch(53% 52.26 286.91 / 0.04);
+  --color-band-pi-edge: lch(53% 52.26 286.91 / 0.2);
+  --color-band-cycle: lch(64.64% 1.25 282 / 0.05);
+  --color-band-cycle-edge: lch(64.64% 1.25 282 / 0.16);
+
+  --radius-control: 8px;
+  --radius-palette: 12px;
+  --radius-composer: 21px;
+  --shadow-palette: 0 9px 48px lch(0 0 0 / 0.08), 0 6px 24px lch(0 0 0 / 0.1), 0 1px 1px lch(0 0 0 / 0.04);
+  --shadow-card: 0 0 0 0.5px lch(0 0 0 / 0.088), 0 3px 6px -2px lch(0 0 0 / 0.02), 0 1px 1px lch(0 0 0 / 0.04);
+  --shadow-menu: 0 6px 18px lch(0 0 0 / 0.02), 0 3px 9px lch(0 0 0 / 0.04), 0 1px 1px lch(0 0 0 / 0.04);
+  /* Linear's project card (projects-board-points.json): shadow-card with a 1px ring at .029. */
+  --shadow-card-project: 0 0 0 1px lch(0 0 0 / 0.029), 0 3px 6px -2px lch(0 0 0 / 0.02), 0 1px 1px lch(0 0 0 / 0.04);
+  --shadow-comment: 0 3px 6px -2px lch(0 0 0 / 0.02), 0 1px 1px lch(0 0 0 / 0.04);
+  --ease-out-quint: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+:root {
+  --size-sidebar: 244px;
+  --size-header: 44px;
+  --size-row: 44px;
+  --size-group: 36px;
+  --size-nav: 28px;
+  --size-pill: 28px;
+  --size-props: 400px;
+  --size-content: 805px;
+  --size-column: 348px;
+  --size-peek: 416px;
+  --size-composer: 750px;
+  --size-palette: 720px;
+  --size-palette-input: 40px;
+  --size-palette-item: 46px;
+  --motion-quick: 100ms;
+  --motion-hover: 150ms;
+  --motion-regular: 250ms;
+  --motion-slow: 350ms;
+}
+
+/* D12: dark mirrors Linear's light/dark background pairs; not measured (spec §13). */
+[data-theme="dark"] {
+  --color-app: #09090a;
+  --color-panel: #121213;
+  --color-surface: lch(12% 1 282);
+  --color-hover: lch(15% 1 282);
+  --color-selected: lch(21% 1 282);
+  --color-ink-1: lch(96% 0 282);
+  --color-ink-2: lch(86% 1 282);
+  --color-ink-3: lch(62% 1.25 282);
+  --color-ink-4: lch(42% 1.25 282);
+  --color-line-1: #1a1b1d;
+  --color-line-2: #212224;
+  --color-line-3: #2c2d30;
+  --color-line-menu: #2c2d30;
+  --color-line-caret: lch(45% 0 282);
+  --color-highlight: lch(17% 1 282);
+  --color-tab-active: lch(21% 1 282);
+  --color-pill-on: lch(21% 1 282);
+  --color-tab-on: lch(21% 1 282);
+  --color-sidebar-hover: lch(17% 1 282);
+  --color-switch-off: lch(35% 0 282);
+  --color-line-popover: lch(20% 0 282);
+  --color-fill-tag: lch(21% 1 282);
+  --color-fill-cycle: lch(19% 1 282);
+  --color-fill-tile: lch(19% 1 282);
+  --color-hover-soft: lch(14% 1 282);
+  --color-line-grid: lch(16% 0 282);
+  --color-line-frame: lch(19% 0 282);
+  --color-ink-nav: lch(64% 1.25 282);
+  --color-health-hover: lch(70% 0 282 / 0.125);
+  --color-chart-scope: lch(48% 1 282);
+  --color-chart-today: lch(30% 0 282);
+  --color-chart-guide: lch(17% 0 282);
+  --color-chart-hatch: lch(24% 0 282);
+  --color-project-planned: lch(50% 1.61 272);
+  --color-board-column: lch(9% 1 282);
+  --color-weekend: lch(30% 0.5 282 / 0.175);
+  --color-today-fade: lch(25% 8 282);
+  --color-overrun-from: lch(16% 6 20);
+  --color-overrun-to: lch(20% 12 20);
+  --color-line-bar-hover: lch(100% 0 0 / 0.15);
+  --color-pill-hover: lch(17% 1 282);
+  --color-band-pi: lch(60% 52.26 286.91 / 0.08);
+  --color-band-pi-edge: lch(60% 52.26 286.91 / 0.3);
+  --color-band-cycle: lch(64.64% 1.25 282 / 0.06);
+  --color-band-cycle-edge: lch(64.64% 1.25 282 / 0.2);
+  --color-status-completed: lch(70% 1.25 282);
+  --color-priority: lch(70% 1.25 282);
+}

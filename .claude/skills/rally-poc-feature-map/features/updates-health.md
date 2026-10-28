@@ -1,0 +1,40 @@
+# Updates & health
+
+Last verified: f064d7ee53a4 on 2026-10-20 (live)
+
+Feature and capability updates and the health they report: the Activity tab (Comment | Update composer over a feed), the "Latest update" card with its diff block, and the health chip shown in lists, boards, the timeline and capability rows. Health is the latest reported health, else Auto (calculated from the target date, progress and blocked stories) with "Auto" in the age slot (D36). Updates are stored as Rally ConversationPosts with a header, a body and a footer. Posting needs the `[DEMO] ` prefix, the demo team and the `collabathon-demo` tag with the guard on (D35). PMs use it. It lives in `web/src/pm/PmActivity.tsx`, `UpdateCard.tsx`, `diff.ts`, `health.ts` and `server/app/pm.py`. Overall: beta. Posting and removal were driven live; the capability never changes because the demo Features are not started, and the feed's spacing was not measured.
+
+## Sub-features
+
+| ID | What it does | Maturity | Surface | Since | Live | Evidence |
+|---|---|---|---|---|---|---|
+| updates-post | Activity composer with a Comment/Update toggle (Update selected), health chip defaulting to the latest reported health else On track, picker On track, At risk, Off track (no number keys), "Post update"; waits for Rally ("Posting…"), a refused update keeps its text and says why | stable | UI+API | 8a4b87f | 2026-10-20 | `web/src/pm/PmActivity.tsx:149`, `web/src/pm/PmActivity.test.tsx::⌘↵ posts the update with its health as HTML, shows Posting… until Rally answers, then clears and leads the feed`, `::a refused update keeps the text and the health, and toasts why`, `web/src/store/pm.test.ts::postUpdate success: the update leads, the project reports it, and a loaded initiatives list reloads`, flow `project-update` (At risk posted, 201), `check api` api:update-round-trip, dry run scenario 7: an At risk update on the [DEMO] feature, twice |
+| updates-health-propagation | After posting, the feature's health changes in the list, the board, the timeline and the feature page without a reload; deleting the update restores it | stable | UI+API | 8a4b87f | 2026-10-20 | `server/app/pm.py:81`, `server/tests/test_pm.py::test_reported_health_wins_over_auto`, `test_portfolio.py::test_project_list_has_health_from_updates_else_auto`, flow `project-update` (list chip "At risk", then "On track" after the delete), dry run scenario 7: list "At risk · now", timeline "At risk, last update 1 minute ago", the feature's latest health At risk, then On track after `DELETE /api/comments/<id>` |
+| updates-initiative-health | An update on a feature moves its capability's health row and pills | beta | UI+API | 6b3e00a | 2026-10-20 FAIL | `server/app/pm.py:88`, `web/src/pm/initiatives.test.ts::healthCounts omits zeros and keeps on track, at risk, off track; no target is not a reported health`; the [DEMO] capability stayed "No updates / No active features" after the At risk update, because only started features count and the seed cannot start the [DEMO] Features (Rally work rules); a real capability with started features was not tested with a write |
+| updates-card | The "Latest update" card: health and label, avatar, author, age with the full time as title, a sanitized body, a diff block ("Target date moved from … to …", "Progress since Oct 16 · 37% → 52%"); the card collapses; a capability's lists a risk row per active feature worse than on track | beta | UI | bc53e27 | 2026-10-20 | `web/src/pm/UpdateCard.tsx:30`, `web/src/pm/diff.ts:34`, `web/src/pm/diff.test.ts::a target with none before it is set; a different one moved; the same one, or one cleared, is no row`, `::a missing footer (progress and target both null, as the server parses it) claims nothing on either side`, `web/src/pm/ProjectPage.test.tsx::the update card shows health, author and age, the body sanitized, and what changed since the last update`, dry run: the diff block read "Target date moved from Dec 4th to Dec 5th" under the posted update, which exposed the one-day date error fixed in `end_day` |
+| updates-feed | The Activity feed, newest first: update cards with absolute dates, comments, then "<owner> created the feature · date" | beta | UI | 8a4b87f | 2026-10-20 | `web/src/pm/PmActivity.test.tsx::the feed is newest first, updates and comments by date, then '<owner> created the feature · date'`, `::a capability's system line reads 'created the capability'`, dry run; feed spacing and comment cards were not measured |
+| updates-comments | Comment mode on a feature or capability: shown at once, a refused one comes off the feed and its text returns | beta (stable pending live) | UI+API | 8a4b87f | 2026-10-20 | `PmActivity.test.tsx::a comment shows at once and clears the editor; a refused one comes off the feed and its text comes back`, `store/pm.test.ts::a refused project comment disappears and says why`, `check api` api:project-comment-round-trip (created, deleted 200); no flow types a comment into the feature Activity tab |
+| updates-health-chip | The chip: icon, label, age at 0.7 alpha, Auto in the age slot, "No updates" with a dashed circle, icon-only variant, Linear's aria text; a health not read yet (a story-side copy) is a blank that holds the chip's box, never "No updates" | beta | UI | 6a26fb3 | 2026-10-20 | `web/src/pm/health.ts:21-44`, `web/src/pm/health.test.ts::Auto health puts Auto in the age slot (D36)`, `::aria text is Linear's, word for word`, `web/src/components/pm.test.tsx::the health chip: icon, label, a 0.7 age, the health colour and Linear's aria`, `::health not read yet (null, from an issue-side read) is a quiet blank, not No updates`, `web/src/store/pm.test.ts::a refresh does not wipe a project's health`, dry run: "Off track, set automatically: Past its target date (…)" on the list; the green and yellow paint is more saturated than Linear's capture and the dark theme has no health colours |
+
+## How to get to it (user POV)
+
+1. Open a feature (Features › a feature) and choose the "Activity" tab. "Update" is selected.
+2. Press the health chip (it reads "On track") and choose "At risk", write the update, and press "Post update".
+3. To comment instead, choose "Comment" in the toggle. A capability's Activity tab works the same way.
+4. The health chip in a list row opens the feature's updates.
+
+## Driving it
+
+Preconditions: baseline, then `rallypoc seed`. Only the [DEMO] features can take updates.
+
+- **updates-post**, **updates-health-propagation**: → `rallypoc browser run project-update` → PASS: an At risk update is posted, the list chip reads At risk, the update is deleted and the chip reads On track again.
+- **updates-post** against the proxy: → `rallypoc check api` → `api:update-round-trip` PASS (health after posting At risk; deleted 200; latest update after delete None).
+- **updates-comments**: → `rallypoc check api` → `api:project-comment-round-trip` PASS.
+- **updates-initiative-health**: FAIL for the [DEMO] capability. Post an update on `[DEMO] Linear-style Rally client`, read `GET /api/initiatives/<key>` and see `health` stay `no_target`. Delete the update with `DELETE /api/comments/<id>` afterwards.
+
+## Gotchas
+
+- **Target dates were a day late until this task.** Rally stamps a planned end at 23:59:59 local, which is the next UTC day, so reading the stamp's UTC date showed every feature, capability and PI end one day late and made the diff block read "moved from Dec 4th to Dec 5th" under an unchanged date. `end_day` (`server/app/rally/mapping.py:104`) now returns the closing day; `server/tests/test_mapping.py::test_end_day_is_the_day_the_planned_end_closes` pins it.
+- **Updates wait for Rally; comments do not.** The Post button reads "Posting…" until Rally answers, while a comment appears at once and is removed if refused (`PmActivity.tsx:65`).
+- **A deleted update must be removed with `DELETE /api/comments/<id>`.** There is no delete button in the UI.
+- **Rally can rewrite an update's HTML.** The parser tolerates a footer Rally rewrote and compares with the nearest earlier update that has one (`server/tests/test_pm.py::test_update_parse_tolerates_rally_rewriting_html`, `e3c1fef`).
