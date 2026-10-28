@@ -12,7 +12,7 @@ test("load maps the bootstrap", async () => {
   const { store } = await readyStore();
   const s = store.getState();
   expect(s.status).toBe("ready");
-  expect(s.meta).toMatchObject({ me: DANA, writeGuard: "demo", demoTeamId: 9001, workspace: { name: "Demo Workspace" } });
+  expect(s.meta).toMatchObject({ me: DANA, workspace: { name: "Demo Workspace" } });
   expect(s.yourTeamIds).toEqual([9001, 9002]);
   expect(Object.keys(s.issues).map(Number).sort()).toEqual([1001, 1002, 1201, 1300]);
   expect(s.subIssues[4002].issue_id).toBe(1300);
@@ -313,7 +313,7 @@ test("a comment that could not reach Rally offers no toast retry", async () => {
 });
 
 const session = (me: { id: number; name: string }, workspace: { id: number; name: string }) =>
-  ({ connected: true, me, workspace, write_guard: "demo" as const, error: null });
+  ({ connected: true, me, workspace, error: null });
 
 test("connecting as another account drops the old account's data before loading", async () => {
   const { store, api } = await readyStore();
@@ -375,7 +375,7 @@ test.each(["connecting as another account", "disconnecting"])("replies to reques
 
     const other = { id: 777, name: "Other Person" };
     if (how === "disconnecting") {
-      api.disconnect.mockResolvedValueOnce({ connected: false, me: null, workspace: null, write_guard: "demo", error: null });
+      api.disconnect.mockResolvedValueOnce({ connected: false, me: null, workspace: null, error: null });
       await store.getState().disconnect();
     } else {
       api.connect.mockResolvedValueOnce(session(other, { id: 8002, name: "Other WS" }));
@@ -417,7 +417,7 @@ test("after a change of account, a cycle load starts fresh rather than joining t
   const old = deferred<CycleList>();
   api.teamCycles.mockReturnValueOnce(old.promise);
   void store.getState().loadCycles(9001);
-  api.disconnect.mockResolvedValueOnce({ connected: false, me: null, workspace: null, write_guard: "demo", error: null });
+  api.disconnect.mockResolvedValueOnce({ connected: false, me: null, workspace: null, error: null });
   await store.getState().disconnect();
   api.teamCycles.mockResolvedValueOnce({ cycles: [], stats: [], has_older: false });
   await store.getState().loadCycles(9001);

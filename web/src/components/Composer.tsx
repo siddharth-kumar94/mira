@@ -36,12 +36,11 @@ function rememberProject(team: number, project: number): void {
   }
 }
 
-/** A story always needs a project (D15). In demo mode only [DEMO] projects can take new issues. */
-export function assignableProjects(app: Pick<AppState, "projects" | "meta">, teamId: number | null): Project[] {
+/** A story always needs a project (D15). */
+export function assignableProjects(app: Pick<AppState, "projects">, teamId: number | null): Project[] {
   if (teamId === null) return [];
-  const prefix = app.meta?.writeGuard === "demo" ? app.meta.demoPrefix : null;
   return Object.values(app.projects)
-    .filter((p) => p.team_id === teamId && p.status_category !== "completed" && (prefix === null || p.name.startsWith(prefix)))
+    .filter((p) => p.team_id === teamId && p.status_category !== "completed")
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -86,9 +85,6 @@ function chipFace(picker: Picker, d: Draft, app: AppState, project: Project | un
 
 const UNSET: Record<Picker, string> = { status: "Status", priority: "Priority", assignee: "Assignee", project: "Feature", estimate: "Estimate", labels: "Labels", cycle: "" };
 
-/** The title opens holding "[DEMO] " in demo mode: put the caret after it, or typing lands in front of the prefix. */
-const caretAtEnd = (el: HTMLTextAreaElement | null) => el?.setSelectionRange(el.value.length, el.value.length);
-
 export function Composer() {
   const open = useUi((u) => u.composerOpen);
   const prefill = useUi((u) => u.composerPrefill);
@@ -97,10 +93,9 @@ export function Composer() {
   const hidden = useUi((u) => u.hiddenTeamIds);
   const app = useAppState();
   const meta = app.meta;
-  const prefix = meta?.writeGuard === "demo" ? meta.demoPrefix : "";
   const teamIds = useMemo(() => sidebarTeamIds(app.yourTeamIds, joined, hidden), [app.yourTeamIds, joined, hidden]);
   const [teamId, setTeamId] = useState<number | null>(null);
-  const [title, setTitle] = useState(prefix);
+  const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [draft, setDraft] = useState<Draft>({ status: "backlog", priority: 0, assignee_id: null, project_id: null, estimate: null, cycle_id: null, labels: [] });
   const [chose, setChose] = useState(false); // the person picked a project themselves
@@ -110,8 +105,8 @@ export function Composer() {
   useEffect(() => {
     if (!open) return;
     const here = route.name === "team" ? route.teamId : null;
-    setTeamId(prefill?.teamId ?? here ?? (meta?.writeGuard === "demo" ? meta.demoTeamId : null) ?? teamIds[0] ?? null);
-    setTitle(prefix);
+    setTeamId(prefill?.teamId ?? here ?? teamIds[0] ?? null);
+    setTitle("");
     setDescription("");
     setChose(prefill?.project_id !== undefined);
     setDraft({
@@ -119,7 +114,7 @@ export function Composer() {
       priority: prefill?.priority ?? 0,
       assignee_id: prefill && "assignee_id" in prefill ? prefill.assignee_id ?? null : route.name === "my" ? meta?.me.id ?? null : null,
       project_id: prefill?.project_id ?? null, estimate: null, cycle_id: prefill?.cycle_id ?? null,
-      labels: meta?.writeGuard === "demo" ? [meta.demoTag] : [],
+      labels: [],
     });
   }, [open]); // reset each time the composer opens
 
@@ -127,7 +122,7 @@ export function Composer() {
     if (open && teamId !== null && !appStore.getState().teamState[teamId]) void appStore.getState().loadTeam(teamId);
   }, [open, teamId]);
 
-  const projects = useMemo(() => assignableProjects(app, teamId), [app.projects, app.meta, teamId]);
+  const projects = useMemo(() => assignableProjects(app, teamId), [app.projects, teamId]);
   const projectIds = projects.map((p) => p.id).join(",");
   useEffect(() => { // default to the last project used for this team, until the person picks one
     if (!open || teamId === null) return;
@@ -137,7 +132,7 @@ export function Composer() {
   }, [open, teamId, projectIds, chose]);
 
   const close = () => uiStore.getState().setComposer(false);
-  const canSubmit = teamId !== null && draft.project_id !== null && title.trim().length > prefix.trim().length && title.startsWith(prefix) && !busy;
+  const canSubmit = teamId !== null && draft.project_id !== null && title.trim().length > 0 && !busy;
   const submit = async () => {
     if (!canSubmit || teamId === null || draft.project_id === null) return;
     setBusy(true);
@@ -150,7 +145,7 @@ export function Composer() {
     if (!created) return;
     rememberProject(teamId, draft.project_id);
     uiStore.getState().select(created.id);
-    if (more) { setTitle(prefix); setDescription(""); }
+    if (more) { setTitle(""); setDescription(""); }
     else close();
   };
 
@@ -194,7 +189,7 @@ export function Composer() {
             <span className="text-small text-ink-2">New story</span>
             <IconButton className="ml-auto" bordered={false} label="Close" icon="close" onClick={close} />
           </div>
-          <textarea aria-label="Story title" ref={caretAtEnd} autoFocus rows={1} value={title} placeholder="Story title" onChange={(e) => setTitle(e.target.value.replace(/\n/g, " "))}
+          <textarea aria-label="Story title" autoFocus rows={1} value={title} placeholder="Story title" onChange={(e) => setTitle(e.target.value.replace(/\n/g, " "))}
             className="mt-[17px] block w-full resize-none bg-transparent px-4 text-[18px] font-semibold leading-[28.8px] text-ink-1 placeholder:text-ink-4" />
           <textarea aria-label="Story description" rows={3} value={description} placeholder="Add description…" onChange={(e) => setDescription(e.target.value)}
             className="mt-px block min-h-[76px] w-full resize-none bg-transparent px-4 text-regular font-normal leading-[22.5px] text-ink-2 placeholder:text-ink-4" />
@@ -219,7 +214,7 @@ export function Composer() {
             })}
           </div>
           {loaded && projects.length === 0 && (
-            <p className="px-4 pt-3 text-mini text-blocked">This team has no {prefix ? "[DEMO] " : "open "}features to add stories to.</p>
+            <p className="px-4 pt-3 text-mini text-blocked">This team has no open features to add stories to.</p>
           )}
           <div className="flex items-center justify-end gap-3 px-4 pb-3 pt-6">
             <label className="flex items-center gap-2 text-mini font-normal text-ink-3">

@@ -1,15 +1,17 @@
 """Playwright flows for `rallypoc browser run <flow>` (Mira v2, Phase 2). Each drives the real app and raises on failure.
 
-Flows change only [DEMO] items, and the CLI refuses to run them unless the proxy's write guard is on (spec §11)."""
+Flows change only [DEMO] items."""
 import re
 import time
 from collections.abc import Callable
 from functools import cache
+from pathlib import Path
 
 import httpx
 from playwright.sync_api import Locator, Page, TimeoutError as PlaywrightTimeout, expect
 
 WEB = "http://127.0.0.1:5173"
+ROOT = Path(__file__).resolve().parents[3]
 FLOWS: dict[str, Callable[[Page], None]] = {}
 DEMO_STORY = "Story editor with HTML round-trip"       # seeded: Todo (Defined, in the sprint), owned by you
 PEEK_STORY = "My Work view with keyboard navigation"     # seeded: In Progress, with two tasks
@@ -29,8 +31,9 @@ def bootstrap() -> dict:
 
 @cache
 def demo() -> dict:
-    b = bootstrap()
-    return {"team": b["demo_team_id"], "me": b["me"]["name"]}
+    team = next((line.partition("=")[2].strip() for line in (ROOT / ".env").read_text().splitlines()
+                 if line.partition("=")[0].strip() == "RALLY_PROJECT"), "")
+    return {"team": int(team), "me": bootstrap()["me"]["name"]}
 
 
 def drag(page: Page, source, target) -> None:
@@ -475,9 +478,8 @@ def initiatives(page: Page) -> None:
 
 @flow
 def settings(page: Page) -> None:
-    """Preferences shows Demo mode; the theme select flips data-theme and is put back; Teams lists the demo team."""
+    """The theme select flips data-theme and is put back; Teams lists the demo team."""
     page.goto(f"{WEB}/settings/preferences")
-    expect(page.get_by_text("Demo mode")).to_be_visible()
     html = page.locator("html")
     original = html.get_attribute("data-theme") or "light"
     other = "Dark" if original == "light" else "Light"

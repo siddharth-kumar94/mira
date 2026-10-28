@@ -36,6 +36,8 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 PROXY = "http://127.0.0.1:8787"
 WEB = "http://127.0.0.1:5173"
+DEMO_PREFIX = "[DEMO] "
+DEMO_TAG = "collabathon-demo"
 SERVICES = {
     "server": {"cmd": ["uv", "run", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8787"],
                "cwd": ROOT / "server", "port": 8787, "health": f"{PROXY}/api/health"},
@@ -125,13 +127,21 @@ def api_call(method: str, path: str, body=None) -> tuple[int, object]:
         return r.status_code, r.text
 
 
-def require_demo() -> None:
-    """Checks must never touch real work (spec §11): refuse unless the running proxy guards writes."""
+def env_value(key: str) -> str:
+    """A value from the repo-root .env, or "" when it isn't set."""
+    env = ROOT / ".env"
+    for line in env.read_text().splitlines() if env.exists() else []:
+        k, _, v = line.partition("=")
+        if k.strip() == key:
+            return v.strip()
+    return ""
+
+
+def require_connected() -> None:
+    """Checks need a proxy that is connected to Rally."""
     status, s = api_call("GET", "/api/session")
     if status != 200 or not isinstance(s, dict):
         raise Usage(f"/api/session answered HTTP {status}; is the stack up?")
-    if s.get("write_guard") != "demo":
-        raise Usage("the proxy is running with the write guard off; run `rallypoc stack restart` (demo is the default)")
     if not s.get("connected"):
         raise Usage("the proxy isn't connected to Rally: " + str(s.get("error") or "no API key"))
 
@@ -192,7 +202,6 @@ def wait_http(url: str, timeout: float, name: str) -> None:
 
 def stack_up(args) -> None:
     d = state_dir(args)
-    mode = getattr(args, "write_guard", "demo") or "demo"
     for name, svc in SERVICES.items():
         if pid_of(args, name):
             print(f"{name}: already up")
@@ -200,15 +209,14 @@ def stack_up(args) -> None:
         if port_open(svc["port"]):
             raise Usage(f"port {svc['port']} is busy and not ours; run `rallypoc doctor`")
         log_path = d / "logs" / f"{name}.log"
-        env = {**os.environ, "WRITE_GUARD": mode} if name == "server" else None
-        echo(f"(cd {svc['cwd'].relative_to(ROOT)} && {'WRITE_GUARD=' + mode + ' ' if env else ''}{' '.join(svc['cmd'])}) >> {log_path}")
+        echo(f"(cd {svc['cwd'].relative_to(ROOT)} && {' '.join(svc['cmd'])}) >> {log_path}")
         with open(log_path, "ab") as log:
             p = subprocess.Popen(svc["cmd"], cwd=svc["cwd"], stdout=log, stderr=subprocess.STDOUT,
-                                 start_new_session=True, env=env)
+                                 start_new_session=True)
         (d / "pids" / f"{name}.pid").write_text(str(p.pid))
     for name, svc in SERVICES.items():
         wait_http(svc["health"], 90, name)
-    print(f"stack: up (write guard {mode})")
+    print("stack: up")
 
 
 def stack_down(args) -> None:
@@ -268,7 +276,7 @@ def cmd_api(args) -> None:
     except ValueError as e:
         raise Usage(f"--json is not valid JSON ({e})")
     if args.method.upper() != "GET":
-        require_demo()  # spec D20: the verify CLI never writes unless the proxy guards writes
+        require_connected()
     deadline = time.time() + args.timeout
     while True:
         status, data = api_call(args.method, args.path, body)
@@ -297,7 +305,7 @@ def cmd_browser(args) -> None:
         if run([sys.executable, "-m", "playwright", "install", "chromium"]) != 0:
             raise Fail("playwright install failed")
         return
-    require_demo()
+    require_connected()
     if args.action == "snapshot" and not args.target.startswith("/"):
         raise Usage("snapshot needs a URL path starting with /")
     from playwright.sync_api import sync_playwright
@@ -524,8 +532,8 @@ def phase4_checks(b: dict, demo_team: int, prefix: str, verdict, skip, create_th
 
 
 def check_api(args) -> None:
-    """Spec §12 live checks. Writes touch only [DEMO] items, with the guard on, and every one is put back."""
-    require_demo()
+    """Spec §12 live checks. Writes touch only [DEMO] items, and every one is put back."""
+    require_connected()
     failed = 0
 
     def verdict(name: str, ok: bool, evidence="", reason: str = "") -> None:
@@ -538,7 +546,9 @@ def check_api(args) -> None:
         raise Fail(f"bootstrap returned HTTP {status}: {b}")
     saved = state_dir(args) / "evidence" / "check-api-bootstrap.json"
     saved.write_text(json.dumps(b, indent=1))
-    prefix, tag, demo_team = b["demo_prefix"], b["demo_tag"], b["demo_team_id"]
+    prefix, tag, demo_team = DEMO_PREFIX, DEMO_TAG, int(env_value("RALLY_PROJECT") or 0)
+    if not demo_team:
+        raise Usage("RALLY_PROJECT is not set in .env; the checks need the demo team")
     demo = _demo_ids(b["issues"], prefix, tag)
     verdict("bootstrap-demo", len(demo) >= 8, saved, f"{len(demo)} [DEMO] issues assigned to you; expected 8 — run `rallypoc seed`")
     others = [t for t in b["teams"] if t["id"] != demo_team]
@@ -549,14 +559,6 @@ def check_api(args) -> None:
         s, load = api_call("GET", f"/api/teams/{others[0]['id']}")
         verdict("team-load-real", s == 200 and len(load.get("issues", [])) > 0,
                 f"{others[0]['name']}: {len(load.get('issues', [])) if s == 200 else s} issues", f"HTTP {s}")
-
-    real = next((i for i in b["issues"] if i["id"] not in demo), None)
-    if real is None:
-        record(args, "api:guard-blocks-real", "SKIP", "", "no non-demo issue is assigned to you")
-    else:
-        # A no-op patch (same estimate): even if the guard were broken, Rally would see no change.
-        s, body = api_call("PATCH", f"/api/issues/{real['id']}", {"estimate": real["estimate"]})
-        verdict("guard-blocks-real", s == 403, f"HTTP {s}", f"expected 403, got {s}: {body}")
 
     s, team = api_call("GET", f"/api/teams/{demo_team}")
     if s != 200:
@@ -719,8 +721,6 @@ def main(argv=None) -> int:
     s.add_argument("action", choices=["up", "down", "status", "logs", "restart"])
     s.add_argument("--service", choices=list(SERVICES))
     s.add_argument("--lines", type=int, default=50)
-    s.add_argument("--write-guard", choices=["demo", "off"], default="demo",
-                   help="demo (default) limits writes to [DEMO] items; off is for live use only. Checks refuse to run with off")
     s.set_defaults(fn=cmd_stack)
     a = sub.add_parser("api", help="call the proxy",
                        epilog="examples: rallypoc api GET /api/bootstrap --expect 200 --field me.name\n"

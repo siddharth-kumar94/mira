@@ -5,7 +5,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.domain import PortfolioPatch, UpdateCreate
-from app.guard import GuardError
 from app.main import create_app
 from app.pm import format_update
 from app.rally.client import RallyError
@@ -142,16 +141,6 @@ async def test_post_update_writes_header_body_and_footer():
     assert (u.id, u.health, u.html, u.progress, u.target) == (98, "at_risk", "<p>Slipping</p>", 0.4, "2026-12-31")
 
 
-async def test_updates_only_on_demo_items_in_demo_mode():
-    # Built inline: the fake client answers with the first matching route, and portfolio_client's capability is a demo one.
-    c = standard(FakeClient())
-    c.on("QUERY", "/portfolioitem/capability", [rally_capability(name="AI/ML 2026 - Agentic Platform",
-                                                                 Project=ref_obj(f"project/{OTHER_TEAM_ID}"))])
-    with pytest.raises(GuardError, match="demo team"):
-        await make_adapter(c).post_update("initiative", "C251", UpdateCreate(health="on_track"))
-    assert c.posts() == []
-
-
 UNTAGGED = rally_feature(9001, "F9001", "[DEMO] F", Tags=tags())
 
 
@@ -168,24 +157,17 @@ def api_post(adapter, path: str, body: dict):
         return http.post(path, json=body)
 
 
-def test_post_update_refuses_untagged_demo_feature():
+def test_post_update_on_an_untagged_feature():
     c = feature_client(UNTAGGED)
     r = api_post(make_adapter(c), "/api/projects/F9001/updates", {"health": "on_track"})
-    assert r.status_code == 403 and "tagged collabathon-demo" in r.json()["error"]
-    assert c.posts() == []
-
-
-async def test_post_update_fetches_tags():
-    c = feature_client(rally_feature(9001, "F9001", "[DEMO] F"))
-    await make_adapter(c).post_update("project", "F9001", UpdateCreate(health="on_track"))
-    assert "Tags" in c.queries("/portfolioitem/feature")[0][2]["fetch"].split(",")
+    assert r.status_code == 201
+    assert len(c.posts()) == 1
 
 
 def test_project_comment_round_trip():
     c = feature_client(rally_feature(9001, "F9001", "[DEMO] F"))
     r = api_post(make_adapter(c), "/api/projects/F9001/comments", {"html": "<p>[DEMO] hi</p>"})
     assert r.status_code == 201 and r.json()["html"] == "<p>[DEMO] hi</p>"
-    assert "Tags" in c.queries("/portfolioitem/feature")[0][2]["fetch"].split(",")
     (post,) = c.posts()
     assert post[3] == {"ConversationPost": {"Artifact": "/portfolioitem/feature/9001", "Text": "<p>[DEMO] hi</p>"}}
 
@@ -200,29 +182,9 @@ def test_initiative_comment_on_a_tagged_demo_capability():
     assert c.posts()[0][3]["ConversationPost"]["Artifact"] == "/portfolioitem/capability/251"
 
 
-def test_initiative_comment_refused_on_real_capability():
-    c = standard(FakeClient())
-    c.on("QUERY", "/portfolioitem/capability", [rally_capability(
-        name="AI/ML 2026 - Agentic Platform", Project=ref_obj(f"project/{OTHER_TEAM_ID}"), Tags=tags())])
-    r = api_post(make_adapter(c), "/api/initiatives/C251/comments", {"html": "<p>x</p>"})
-    assert r.status_code == 403
-    assert c.posts() == []
-
-
-def test_comment_guard_off_allows_an_untagged_feature():
+def test_comment_on_an_untagged_feature():
     c = feature_client(UNTAGGED)
-    assert api_post(make_adapter(c, mode="off"), "/api/projects/F9001/comments", {"html": "<p>x</p>"}).status_code == 201
-
-
-async def test_delete_update_checks_tag():
-    c = standard(FakeClient())
-    c.on("QUERY", "/conversationpost", [rally_post(95, "<p>x</p>", artifact="portfolioitem/feature/9001")],
-         query_has="ObjectID = 95")
-    c.on("GET", "/portfolioitem/feature/9001", {"PortfolioItem/Feature": UNTAGGED})
-    c.on("DELETE", "/conversationpost/95", {"OperationResult": {"Errors": [], "Warnings": []}})
-    with pytest.raises(GuardError, match="tagged collabathon-demo"):
-        await make_adapter(c).delete_comment(95)
-    assert [x for x in c.calls if x[0] == "DELETE"] == []
+    assert api_post(make_adapter(c), "/api/projects/F9001/comments", {"html": "<p>x</p>"}).status_code == 201
 
 
 # ---------- D38: priority on projects and initiatives, when Rally has the field ----------
@@ -322,13 +284,6 @@ def test_set_priority_without_field_is_422():
     assert r.status_code == 422 and r.json() == {"error": "This workspace has no priority field for features"}
     r = api_patch(make_adapter(c), "/api/initiatives/C251", {"priority": 2})
     assert r.status_code == 422 and r.json() == {"error": "This workspace has no priority field for capabilities"}
-    assert c.posts() == []
-
-
-def test_set_priority_refused_by_guard():
-    c = priority_client(UNTAGGED)
-    r = api_patch(make_adapter(c), "/api/projects/F9001", {"priority": 2})
-    assert r.status_code == 403 and "tagged collabathon-demo" in r.json()["error"]
     assert c.posts() == []
 
 

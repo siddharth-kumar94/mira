@@ -2,7 +2,7 @@
 
 One file per product area. Each file says what exists, how mature it is, how a user reaches it, and how to drive it through `rallypoc` (the verify-rally-poc skill, at `.claude/skills/verify-rally-poc/rallypoc`). Use the map to answer questions without re-reading the whole codebase. Use the source to settle anything the map does not cover or that may have changed.
 
-Scope: `server/` (proxy, adapter, write guard), `web/` (client), `scripts/` (demo data). Rally itself is out of scope. The areas are spec §12's, replacing v1's five.
+Scope: `server/` (proxy, adapter), `web/` (client), `scripts/` (demo data). Rally itself is out of scope. The areas are spec §12's, replacing v1's five.
 
 ## Maturity rubric
 
@@ -116,7 +116,7 @@ Table rows have exactly 7 cells (`render-map` fails on any other count). `Surfac
 
 | File | Area | Roles | Overall (2026-10-20) |
 |---|---|---|---|
-| [proxy.md](proxy.md) | FastAPI proxy, Rally adapter, mapping, write guard | all | beta |
+| [proxy.md](proxy.md) | FastAPI proxy, Rally adapter, mapping | all | beta |
 | [connect-settings.md](connect-settings.md) | Connect card, Settings (Preferences, Account, Teams, team page) | all | beta |
 | [my-issues.md](my-issues.md) | My stories in Focus, Assigned and Created | all | beta |
 | [team-issues.md](team-issues.md) | Team Stories: Active, Backlog, All; list, board, grouping, rank, bulk | all | beta |

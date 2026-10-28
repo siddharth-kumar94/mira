@@ -4,7 +4,6 @@ import { makeBootstrap, makeIssue } from "../test/fixtures";
 import { buildCommands } from "./commands";
 
 beforeEach(() => appStore.setState({ ...appStore.getInitialState(), meta: { me: { id: 501, name: "Dana Demo" }, workspace: { id: 1, name: "W" },
-  writeGuard: "demo", demoPrefix: "[DEMO] ", demoTag: "collabathon-demo", demoTeamId: 9001,
   projectPriority: false, initiativePriority: false } }, true));
 
 test("contextual commands follow Linear's order, with no heading, and their keycaps", () => {

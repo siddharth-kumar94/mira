@@ -347,7 +347,7 @@ test("connect: success resolves null and loads the app", async () => {
   const store = createAppStore(api);
   await store.getState().load();
   expect(store.getState().status).toBe("needs-key");
-  api.connect.mockResolvedValueOnce({ connected: true, me: DANA, workspace: null, write_guard: "demo", error: null });
+  api.connect.mockResolvedValueOnce({ connected: true, me: DANA, workspace: null, error: null });
   api.bootstrap.mockResolvedValueOnce(makeBootstrap());
   expect(await store.getState().connect("good-key")).toBeNull();
   expect(api.connect).toHaveBeenCalledWith("good-key");
@@ -357,7 +357,7 @@ test("connect: success resolves null and loads the app", async () => {
 
 test("disconnect forgets the session and every cache", async () => {
   const { store, api } = await withProject();
-  api.disconnect.mockResolvedValueOnce({ connected: false, me: null, workspace: null, write_guard: "demo", error: null });
+  api.disconnect.mockResolvedValueOnce({ connected: false, me: null, workspace: null, error: null });
   await store.getState().disconnect();
   const s = store.getState();
   expect(s.status).toBe("needs-key");
@@ -498,7 +498,7 @@ test("a burn-up asked for before a change of account is dropped", async () => {
   const old = deferred<Burnup>();
   api.burnup.mockReturnValueOnce(old.promise);
   const pending = store.getState().loadBurnup("cycle:9001:301", CYCLE_TARGET);
-  api.disconnect.mockResolvedValueOnce({ connected: false, me: null, workspace: null, write_guard: "demo", error: null });
+  api.disconnect.mockResolvedValueOnce({ connected: false, me: null, workspace: null, error: null });
   await store.getState().disconnect();
   old.resolve(BURNUP);
   await pending;

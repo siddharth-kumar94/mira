@@ -1,7 +1,6 @@
 import pytest
 
 from app.domain import CommentCreate, SubIssueCreate, SubIssuePatch, TagCreate
-from app.guard import GuardError
 from app.rally.client import RallyError
 from tests.adapter_kit import make_adapter, standard
 from tests.fake_client import FakeClient
@@ -31,29 +30,13 @@ def no_writes(c: FakeClient) -> bool:
     return not [x for x in c.calls if x[0] in ("POST", "DELETE")]
 
 
-async def test_create_sub_issue_under_demo_issue():
+async def test_create_sub_issue():
     c = client()
     s = await make_adapter(c).create_sub_issue(1001, SubIssueCreate(title="[DEMO] sub", assignee_id=501, hours=2))
     assert s.key == "TA4009"
     assert c.posts()[0][3] == {"Task": {"Name": "[DEMO] sub", "WorkProduct": "/hierarchicalrequirement/1001",
                                         "Project": "/project/9001", "State": "Defined", "Owner": "/user/501",
-                                        "Estimate": 2.0, "ToDo": 2.0, "Tags": [{"_ref": "/tag/7000"}]}}
-
-
-async def test_sub_issue_writes_are_guarded():
-    c = client(story=REAL_STORY, task=rally_task(Name="Real task", Tags=tags()))
-    a = make_adapter(c)
-    with pytest.raises(GuardError):
-        await a.create_sub_issue(1001, SubIssueCreate(title="[DEMO] sub"))
-    with pytest.raises(GuardError):
-        await a.update_sub_issue(4001, SubIssuePatch(status="done"))
-    with pytest.raises(GuardError):
-        await a.delete_sub_issue(4001)
-    assert no_writes(c)
-    c2 = client()
-    with pytest.raises(GuardError, match="prefix"):
-        await make_adapter(c2).create_sub_issue(1001, SubIssueCreate(title="no prefix"))
-    assert no_writes(c2)
+                                        "Estimate": 2.0, "ToDo": 2.0}}
 
 
 async def test_update_and_delete_sub_issue():
@@ -83,60 +66,16 @@ async def test_comment_post_and_delete():
     assert [x[1] for x in c.calls if x[0] == "DELETE"] == ["/conversationpost/95"]
 
 
-async def test_comment_writes_on_real_items_are_refused():
-    c = client(story=REAL_STORY)
-    with pytest.raises(GuardError):
-        await make_adapter(c).add_comment(1001, CommentCreate(html="<p>x</p>"))
-    with pytest.raises(GuardError):
-        await make_adapter(c).delete_comment(95)
-    assert no_writes(c)
-
-
 async def test_deleting_an_update_on_a_demo_project_is_allowed():
     c = client(post=rally_post(95, "<p><b>Mira update · At risk</b></p>", artifact="portfolioitem/feature/201"))
     await make_adapter(c).delete_comment(95)
     assert [x[1] for x in c.calls if x[0] == "DELETE"] == ["/conversationpost/95"]
 
 
-async def test_deleting_an_update_on_a_real_portfolio_item_is_refused():
-    real_feature = rally_feature(object_id=202, formatted_id="F202", name="Real feature",
-                                 Project=ref_obj(f"project/{OTHER_TEAM_ID}"))
-    c = standard(FakeClient())
-    c.on("QUERY", "/conversationpost", [rally_post(95, "<p>x</p>", artifact="portfolioitem/feature/202")],
-         query_has="ObjectID = 95")
-    c.on("GET", "/portfolioitem/feature/202", {"PortfolioItem/Feature": real_feature})
-    c.on("DELETE", "/conversationpost/95", {"OperationResult": {"Errors": [], "Warnings": []}})
-    with pytest.raises(GuardError):
-        await make_adapter(c).delete_comment(95)
-    assert no_writes(c)
 
 
-async def test_sub_issue_title_patch_needs_the_demo_prefix():
-    c = client()
-    with pytest.raises(GuardError, match="prefix"):
-        await make_adapter(c).update_sub_issue(4001, SubIssuePatch(title="no prefix"))
-    assert no_writes(c)
-    await make_adapter(c).update_sub_issue(4001, SubIssuePatch(title="[DEMO] renamed"))
-    assert c.posts()[0][3] == {"Task": {"Name": "[DEMO] renamed"}}
-
-
-async def test_demo_named_and_tagged_sub_issue_in_another_team_is_refused():
-    elsewhere = rally_task(Project=ref_obj(f"project/{OTHER_TEAM_ID}"))
-    c = client(task=elsewhere)
-    a = make_adapter(c)
-    with pytest.raises(GuardError, match="demo team"):
-        await a.update_sub_issue(4001, SubIssuePatch(status="done"))
-    with pytest.raises(GuardError, match="demo team"):
-        await a.delete_sub_issue(4001)
-    assert no_writes(c)
-
-
-async def test_tags_cannot_be_created_in_demo_mode_and_existing_names_are_reused():
-    c0 = client()
-    with pytest.raises(GuardError):
-        await make_adapter(c0).create_tag(TagCreate(name="ux"))
-    assert no_writes(c0)
+async def test_existing_tag_names_are_reused_and_new_ones_created():
     c = standard(FakeClient()).on("QUERY", "/tag", [{"Name": "ux"}])
-    assert (await make_adapter(c, mode="off").create_tag(TagCreate(name="ux"))).name == "ux" and c.posts() == []
+    assert (await make_adapter(c).create_tag(TagCreate(name="ux"))).name == "ux" and c.posts() == []
     c2 = standard(FakeClient()).on("QUERY", "/tag", []).on("POST", "/tag/create", create_result({"Name": "new"}))
-    assert (await make_adapter(c2, mode="off").create_tag(TagCreate(name="new"))).name == "new"
+    assert (await make_adapter(c2).create_tag(TagCreate(name="new"))).name == "new"

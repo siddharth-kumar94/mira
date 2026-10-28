@@ -2,10 +2,9 @@
 from datetime import datetime, timezone
 
 from app.config import Settings
-from app.guard import WriteGuard
 from app.rally.adapter import RallyAdapter
 from tests.fake_client import FakeClient
-from tests.fixtures import BASE, DEMO_TAG, ME, PROJECT_ID, WORKSPACE_ID
+from tests.fixtures import BASE, ME, PROJECT_ID, WORKSPACE_ID
 
 NOW = datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc)
 
@@ -45,9 +44,7 @@ def standard(client: FakeClient, feature: list[dict] = (), capability: list[dict
     return client
 
 
-def make_adapter(client: FakeClient, mode: str = "demo", clock=None, factory=None, tmp_credentials=None) -> RallyAdapter:
+def make_adapter(client: FakeClient, clock=None, factory=None, tmp_credentials=None) -> RallyAdapter:
     extra = {"mira_credentials": tmp_credentials} if tmp_credentials is not None else {}
-    settings = Settings(_env_file=None, rally_api_key="k", rally_workspace=WORKSPACE_ID, rally_project=PROJECT_ID,
-                        write_guard=mode, **extra)
-    return RallyAdapter(client, settings, WriteGuard(mode, PROJECT_ID, "[DEMO] ", DEMO_TAG),
-                        clock=clock or (lambda: NOW), client_factory=factory)
+    settings = Settings(_env_file=None, rally_api_key="k", rally_workspace=WORKSPACE_ID, rally_project=PROJECT_ID, **extra)
+    return RallyAdapter(client, settings, clock=clock or (lambda: NOW), client_factory=factory)

@@ -1,7 +1,6 @@
 import pytest
 
 from app.domain import IssueCreate, IssuePatch, RankRequest
-from app.guard import GuardError
 from app.rally.client import RallyError
 from tests.adapter_kit import make_adapter, standard
 from tests.fake_client import FakeClient
@@ -30,34 +29,6 @@ async def test_status_backlog_clears_ready_and_cycle_and_priority_on_defect():
     await make_adapter(c).update_issue(1101, IssuePatch(status="backlog", priority=1))
     assert c.posts()[0][3] == {"Defect": {"ScheduleState": "Defined", "Ready": False, "Iteration": None,
                                           "Priority": "Resolve Immediately"}}
-
-
-async def test_guard_refuses_real_issue_without_posting():
-    c = client_with(rally_story(**REAL))
-    with pytest.raises(GuardError):
-        await make_adapter(c).update_issue(1001, IssuePatch(estimate=3))
-    assert c.posts() == []
-
-
-async def test_guard_off_allows_real_issue():
-    c = client_with(rally_story(**REAL))
-    await make_adapter(c, mode="off").update_issue(1001, IssuePatch(estimate=3))
-    assert len(c.posts()) == 1
-
-
-async def test_guard_refuses_non_demo_targets():
-    c = client_with(rally_story())
-    c.on("QUERY", "/portfolioitem/feature", [rally_feature(301, "F301", "Real feature")], query_has="ObjectID = 301")
-    c.on("QUERY", "/portfolioitem/feature", [rally_feature(202, "F202", "[DEMO] Other")], query_has="ObjectID = 202")
-    c.on("QUERY", "/iteration", [rally_iteration(399, "Their sprint", "a", "b", project=OTHER_TEAM_ID)])
-    a = make_adapter(c)
-    with pytest.raises(GuardError, match="features"):
-        await a.update_issue(1001, IssuePatch(project_id=301))
-    with pytest.raises(GuardError, match="sprints"):
-        await a.update_issue(1001, IssuePatch(cycle_id=399))
-    assert c.posts() == []
-    await a.update_issue(1001, IssuePatch(project_id=202))
-    assert c.posts()[0][3] == {"HierarchicalRequirement": {"PortfolioItem": "/portfolioitem/feature/202"}}
 
 
 async def test_labels_resolve_and_unknown_is_422():
@@ -89,14 +60,6 @@ async def test_rank_above_a_defect():
         await make_adapter(c).rank_issue(1001, RankRequest(below=1001))
 
 
-async def test_rank_guard_refuses_real_issue_without_posting():
-    c = client_with(rally_story(**REAL))
-    c.on("QUERY", "/artifact", [rally_defect()], query_has="ObjectID = 1101")
-    with pytest.raises(GuardError):
-        await make_adapter(c).rank_issue(1001, RankRequest(above=1101))
-    assert c.posts() == []
-
-
 def create_client(created=None) -> FakeClient:
     c = standard(FakeClient())
     c.on("QUERY", "/portfolioitem/feature", [rally_feature()])
@@ -107,7 +70,7 @@ def create_client(created=None) -> FakeClient:
     return c
 
 
-async def test_create_maps_fields_and_adds_the_demo_label():
+async def test_create_maps_fields():
     c = create_client()
     issue = await make_adapter(c).create_issue(IssueCreate(
         team_id=PROJECT_ID, title="[DEMO] New", project_id=201, status="todo", priority=2, assignee_id=501,
@@ -116,7 +79,7 @@ async def test_create_maps_fields_and_adds_the_demo_label():
     assert c.posts()[0][3] == {"HierarchicalRequirement": {
         "Name": "[DEMO] New", "Project": f"/project/{PROJECT_ID}", "PortfolioItem": "/portfolioitem/feature/201",
         "Description": "<p>d</p>", "ScheduleState": "Defined", "Ready": True, "Iteration": "/iteration/301",
-        "c_Priority": "High", "Owner": "/user/501", "PlanEstimate": 3.0, "Tags": [{"_ref": "/tag/7000"}]}}
+        "c_Priority": "High", "Owner": "/user/501", "PlanEstimate": 3.0}}
     assert len(c.posts()) == 1  # top is Rally's default: no extra rank write
 
 
@@ -128,26 +91,3 @@ async def test_create_bottom_ranks_and_backlog_is_unready():
     assert c.posts()[1][2]["rankTo"] == "BOTTOM"
 
 
-async def test_create_is_guarded():
-    c = create_client()
-    a = make_adapter(c)
-    with pytest.raises(GuardError, match="demo team"):
-        await a.create_issue(IssueCreate(team_id=OTHER_TEAM_ID, title="[DEMO] x", project_id=201))
-    with pytest.raises(GuardError, match="prefix"):
-        await a.create_issue(IssueCreate(team_id=PROJECT_ID, title="x", project_id=201))
-    assert c.posts() == []
-
-
-async def test_create_refuses_non_demo_project_and_cycle():
-    c = standard(FakeClient())  # first matching route answers, so no catch-all feature/iteration routes here
-    c.on("QUERY", "/portfolioitem/feature", [rally_feature(301, "F301", "Real feature")], query_has="ObjectID = 301")
-    c.on("QUERY", "/portfolioitem/feature", [rally_feature()], query_has="ObjectID = 201")
-    c.on("QUERY", "/iteration", [rally_iteration(399, "Their sprint", "a", "b", project=OTHER_TEAM_ID)],
-         query_has="ObjectID = 399")
-    a = make_adapter(c)
-    with pytest.raises(GuardError, match="features"):
-        await a.create_issue(IssueCreate(team_id=PROJECT_ID, title="[DEMO] x", project_id=301))
-    with pytest.raises(GuardError, match="sprints"):
-        await a.create_issue(IssueCreate(team_id=PROJECT_ID, title="[DEMO] x", project_id=201, status="todo",
-                                         cycle_id=399))
-    assert c.posts() == []

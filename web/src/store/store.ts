@@ -12,10 +12,6 @@ export interface Toast { id: number; message: string; retry?: () => void }
 export interface Meta {
   me: User;
   workspace: Workspace;
-  writeGuard: "demo" | "off";
-  demoPrefix: string;
-  demoTag: string;
-  demoTeamId: number | null;
   /** False when Rally has no priority field for projects / initiatives (D38): their priority controls stay hidden. */
   projectPriority: boolean;
   initiativePriority: boolean;
@@ -134,8 +130,7 @@ export const issueKey = (id: number) => `issue:${id}`;
 const subKey = (id: number) => `sub:${id}`;
 
 const metaFrom = (b: Bootstrap): Meta => ({
-  me: b.me, workspace: b.workspace, writeGuard: b.write_guard, demoPrefix: b.demo_prefix, demoTag: b.demo_tag,
-  demoTeamId: b.demo_team_id, projectPriority: b.project_priority, initiativePriority: b.initiative_priority,
+  me: b.me, workspace: b.workspace, projectPriority: b.project_priority, initiativePriority: b.initiative_priority,
 });
 
 /**

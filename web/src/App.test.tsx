@@ -28,7 +28,6 @@ test("My stories shows your work from both teams, grouped by Focus", async () =>
   const nav = screen.getByRole("navigation", { name: "Main" });
   expect(within(nav).getByText("Demo Workspace")).toBeInTheDocument();
   expect(within(nav).getByRole("button", { name: "AI/ML Solutions" })).toBeInTheDocument();
-  expect(within(nav).getByText("Demo mode")).toBeInTheDocument();
 });
 
 test("a user with no recent activity sees empty states, not a crash", async () => {
@@ -110,7 +109,7 @@ test("a good key connects, says who you are and goes to My stories", async () =>
   render(<App />);
   const field = await screen.findByLabelText("Rally API key");
   serve({
-    "POST /api/session": { connected: true, me: { id: 501, name: "Dana Demo" }, workspace: { id: 8001, name: "Demo Workspace" }, write_guard: "demo", error: null },
+    "POST /api/session": { connected: true, me: { id: 501, name: "Dana Demo" }, workspace: { id: 8001, name: "Demo Workspace" }, error: null },
     "GET /api/bootstrap": makeBootstrap(),
   });
   fireEvent.change(field, { target: { value: "synthetic-good-key" } });

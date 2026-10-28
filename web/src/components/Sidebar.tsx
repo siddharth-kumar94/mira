@@ -122,9 +122,6 @@ export function Sidebar() {
       <div className="mt-auto flex items-center gap-1 pt-4">
         <MenuButton label="Help" width={200} side="above" entries={helpEntries}
           button={({ open, toggle }) => <IconButton size={24} label="Open Help menu" icon="help" aria-expanded={open} onClick={toggle} />} />
-        {meta?.writeGuard === "demo" && (
-          <span title="Only [DEMO] items can be changed" className="ml-auto rounded-full bg-hover px-2 py-0.5 text-mini text-ink-2">Demo mode</span>
-        )}
       </div>
     </nav>
   );

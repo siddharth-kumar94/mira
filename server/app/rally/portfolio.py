@@ -13,7 +13,7 @@ from .client import RallyError
 from .issues import KEY_RE, IssueReads, open_projects_query
 from .mapping import (INITIATIVE_FETCH, ISSUE_FETCH, POST_FETCH, PROJECT_FETCH, RELEASE_FETCH, and_query, comment_from_rally,
                       day, end_day, initiative_from_rally, issue_from_rally, oid, or_query, portfolio_priority_to_rally,
-                      project_from_rally, quoted, release_from_rally, snapshot_from_rally, tag_names)
+                      project_from_rally, quoted, release_from_rally, snapshot_from_rally)
 
 BLOCKED_TTL = timedelta(seconds=60)  # planning ruling 7
 BURNUP_FIELDS = ["ObjectID", "PlanEstimate", "ScheduleState", "_ValidFrom", "_ValidTo"]
@@ -213,21 +213,20 @@ class PortfolioReads(IssueReads):
         points = series([snapshot_from_rally(o) for o in snapshots], start, end, today)
         return Burnup(start=start.isoformat(), end=end.isoformat(), points=points)
 
-    async def _guarded_portfolio_row(self, kind: str, ref: str) -> tuple[str, dict]:
-        """The project or initiative row with its tags, once the guard has passed it (D35)."""
+    async def _portfolio_row(self, kind: str, ref: str) -> tuple[str, dict]:
+        """The project or initiative row, with its Rally type path."""
         type_path, fetch = (("portfolioitem/feature", PROJECT_FETCH) if kind == "project"
                             else ("portfolioitem/capability", INITIATIVE_FETCH))
-        row = await self.find_portfolio_row(type_path, f"{fetch},Tags", ref)
-        self.guard.check_portfolio(row["Name"], oid(row["Project"]), tag_names(row.get("Tags")))
+        row = await self.find_portfolio_row(type_path, fetch, ref)
         return type_path, row
 
     async def set_portfolio_priority(self, kind: Literal["project", "initiative"], ref: str, data: PortfolioPatch) -> Project | Initiative:
-        """D38: writes the project's or initiative's custom priority field, when Rally has one. Guarded like any other write."""
+        """D38: writes the project's or initiative's custom priority field, when Rally has one."""
         field_kind, plural = ("feature", "features") if kind == "project" else ("capability", "capabilities")
         field = (await self.pm_priority())[field_kind]
         if field is None:
             raise BadRequest(f"This workspace has no priority field for {plural}")
-        type_path, row = await self._guarded_portfolio_row(kind, ref)
+        type_path, row = await self._portfolio_row(kind, ref)
         value = portfolio_priority_to_rally(data.priority, field.allowed)
         fetch = await (self.project_fetch() if kind == "project" else self.initiative_fetch())
         body = await self.client.post(f"/{type_path}/{row['ObjectID']}", {_PORTFOLIO_TYPE_KEY[kind]: {field.element: value}},
@@ -240,7 +239,7 @@ class PortfolioReads(IssueReads):
 
     async def post_update(self, kind: str, ref: str, data: UpdateCreate) -> Update:
         """Spec §9.3: a discussion post with the health header and a progress/target footer."""
-        type_path, row = await self._guarded_portfolio_row(kind, ref)
+        type_path, row = await self._portfolio_row(kind, ref)
         text = format_update(data.health, data.html, float(row.get("PercentDoneByStoryPlanEstimate") or 0),
                              end_day(row.get("PlannedEndDate")))
         body = await self.client.post("/conversationpost/create", {"ConversationPost": {
@@ -252,7 +251,7 @@ class PortfolioReads(IssueReads):
 
     async def post_portfolio_comment(self, kind: Literal["project", "initiative"], ref: str, data: CommentCreate) -> Comment:
         """A plain discussion post on a project or initiative: the html as given, with no update header."""
-        type_path, row = await self._guarded_portfolio_row(kind, ref)
+        type_path, row = await self._portfolio_row(kind, ref)
         body = await self.client.post("/conversationpost/create", {"ConversationPost": {
             "Artifact": f"/{type_path}/{row['ObjectID']}", "Text": data.html}}, {"fetch": POST_FETCH})
         return comment_from_rally(body["CreateResult"]["Object"])

@@ -71,11 +71,11 @@ test("Add tasks opens a title row; Enter creates it and keeps the row open", asy
   expect(await screen.findByText("TA4001", { exact: false })).toBeInTheDocument();
   expectRallyWords(container); // task list heading, count and the open title row
   const input = screen.getByRole("textbox", { name: "Task title" });
-  expect(input).toHaveValue("[DEMO] "); // the server requires the prefix in demo mode
+  expect(input).toHaveValue("");
   fireEvent.change(input, { target: { value: "[DEMO] Step two" } });
   fireEvent.keyDown(input, { key: "Enter" });
   expect(await screen.findByText("[DEMO] Step two")).toBeInTheDocument();
-  expect(screen.getByRole("textbox", { name: "Task title" })).toHaveValue("[DEMO] "); // demo mode keeps the prefix
+  expect(screen.getByRole("textbox", { name: "Task title" })).toHaveValue("");
   expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Task title" }));
 });
 

@@ -11,7 +11,7 @@ A journey crosses areas, so it can fail where no single area file looks. Each on
 
 ## j-demo-script
 
-Touches: `my-issues-focus`, `palette-pickers`, `palette-keys-core`, `team-issues-board`, `team-issues-backlog-rank`, `issue-page-comments`, `composer-create`, `proxy-issue-writes`, `proxy-write-guard-issues`.
+Touches: `my-issues-focus`, `palette-pickers`, `palette-keys-core`, `team-issues-board`, `team-issues-backlog-rank`, `issue-page-comments`, `composer-create`, `proxy-issue-writes`.
 
 Invariants:
 1. A priority set in ⌘K is the priority shown on the row and the value Rally returns on the next `GET /api/teams/<id>`.
@@ -36,7 +36,7 @@ Result (2026-10-20): PASS for `check api` (every line PASS except `api:cycle-det
 
 ## j-pm-update
 
-Touches: `initiatives-list`, `initiatives-health-auto`, `timeline-canvas`, `timeline-overrun`, `projects-page`, `updates-post`, `updates-health-propagation`, `updates-initiative-health`, `proxy-updates`, `proxy-write-guard-portfolio`.
+Touches: `initiatives-list`, `initiatives-health-auto`, `timeline-canvas`, `timeline-overrun`, `projects-page`, `updates-post`, `updates-health-propagation`, `updates-initiative-health`, `proxy-updates`.
 
 Invariants:
 1. An At risk update on a [DEMO] Feature changes its health chip in the list, the timeline and the feature page without a reload.

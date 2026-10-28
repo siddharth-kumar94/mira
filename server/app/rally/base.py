@@ -8,7 +8,6 @@ from datetime import datetime, timedelta, timezone
 from ..config import Settings
 from ..credentials import delete_key, write_key
 from ..domain import Cycle, Issue, Project, Session, SubIssue, Team, User, Workspace
-from ..guard import WriteGuard
 from .client import RallyClient, RallyError
 from .mapping import (CYCLE_FETCH, INITIATIVE_FETCH, ISSUE_FETCH, PROJECT_FETCH, TEAM_FETCH, cycle_from_rally, iso, oid,
                       or_query, project_from_rally, quoted, short_ref, team_from_rally, user_from_rally)
@@ -42,11 +41,10 @@ def dedupe(rows: Iterable[dict]) -> list[dict]:
 
 
 class RallyBase:
-    def __init__(self, client: RallyClient, settings: Settings, guard: WriteGuard,
+    def __init__(self, client: RallyClient, settings: Settings,
                  clock: Callable[[], datetime] | None = None, client_factory: Callable[[str], RallyClient] | None = None):
         self.client = client
         self.settings = settings
-        self.guard = guard
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._client_factory = client_factory
         self._reset()
@@ -68,16 +66,15 @@ class RallyBase:
 
     async def session(self) -> Session:
         """Spec §6.1. No Rally call when no key is set. The key itself is never part of the answer."""
-        guard = self.settings.write_guard
         if not self.client.connected:
-            return Session(connected=False, write_guard=guard)
+            return Session(connected=False)
         try:
             me, workspace = await asyncio.gather(self.me(), self.workspace())
         except RallyError as e:
             if e.status == 401:
-                return Session(connected=False, write_guard=guard, error=e.message)
+                return Session(connected=False, error=e.message)
             raise
-        return Session(connected=True, me=me, workspace=workspace, write_guard=guard)
+        return Session(connected=True, me=me, workspace=workspace)
 
     async def connect(self, api_key: str) -> Session:
         """Validate the key with Rally, save it (0600), then swap clients. A rejected key changes nothing."""

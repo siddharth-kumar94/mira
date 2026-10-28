@@ -53,16 +53,14 @@ export function pickerOptions(picker: Picker, app: AppState, targets: Issue[], r
       // A project belongs to one team, and an issue can only move to its own team's projects: a selection across
       // teams has none to offer, and says so.
       if (teams.size > 1) return [{ id: "one-team", label: "Features from one team only", disabled: true, apply: () => null }];
-      const prefix = app.meta?.writeGuard === "demo" ? app.meta.demoPrefix : null;
       return Object.values(app.projects)
         .filter((p) => teams.has(p.team_id) && p.status_category !== "completed")
         .sort(byName)
-        .map((p): PickerOption => {
-          const locked = prefix !== null && !p.name.startsWith(prefix);
-          return { id: `pr${p.id}`, label: p.name, hint: locked ? "Demo mode" : p.key, disabled: locked, project: p,
-                   current: all(targets, (i) => i.project_id === p.id),
-                   apply: (i) => (i.kind !== "story" || i.project_id === p.id ? null : { project_id: p.id }) };
-        });
+        .map((p): PickerOption => ({
+          id: `pr${p.id}`, label: p.name, hint: p.key, project: p,
+          current: all(targets, (i) => i.project_id === p.id),
+          apply: (i) => (i.kind !== "story" || i.project_id === p.id ? null : { project_id: p.id }),
+        }));
     }
     case "cycle": {
       const now = Date.now();
@@ -91,14 +89,11 @@ export function pickerOptions(picker: Picker, app: AppState, targets: Issue[], r
       ];
     }
     case "labels": {
-      const demoTag = app.meta?.writeGuard === "demo" ? app.meta.demoTag : null;
       const names = new Set<string>([...Object.values(app.issues).flatMap((i) => i.labels), ...remoteLabels]);
-      if (app.meta) names.add(app.meta.demoTag);
       return [...names].sort().map((label): PickerOption => {
         const every = all(targets, (i) => i.labels.includes(label));
         return {
           id: `l:${label}`, label: `${every ? "Remove" : "Add"} ${label}`, current: every,
-          hint: label === demoTag ? "Required in demo mode" : undefined, disabled: label === demoTag,
           apply: (i) => {
             const has = i.labels.includes(label);
             if (every) return has ? { labels: i.labels.filter((l) => l !== label) } : null;

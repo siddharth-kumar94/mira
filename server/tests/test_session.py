@@ -45,7 +45,7 @@ def test_write_key_leaves_an_existing_directory_alone(tmp_path):
 async def test_session_without_a_key_makes_no_rally_call():
     c = FakeClient(connected=False)
     s = await make_adapter(c).session()
-    assert (s.connected, s.me, s.write_guard) == (False, None, "demo") and c.calls == []
+    assert (s.connected, s.me) == (False, None) and c.calls == []
 
 
 async def test_connect_validates_saves_and_swaps(tmp_path):

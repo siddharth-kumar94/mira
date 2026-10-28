@@ -20,7 +20,6 @@ export const PROJECT_STATUS_LABEL: Record<ProjectCategory, string> = {
 };
 export type InitiativeStatus = "planned" | "active" | "completed";
 export const INITIATIVE_STATUS_LABEL: Record<InitiativeStatus, string> = { planned: "Planned", active: "Active", completed: "Completed" };
-export type GuardMode = "demo" | "off";
 
 export interface User { id: number; name: string }
 export interface Workspace { id: number; name: string }
@@ -96,10 +95,10 @@ export interface SubIssue {
 export interface Comment { id: number; author: User | null; html: string; created_at: string }
 export interface Activity { id: string; author: User | null; text: string; created_at: string }
 
-export interface Session { connected: boolean; me: User | null; workspace: Workspace | null; write_guard: GuardMode; error: string | null }
+export interface Session { connected: boolean; me: User | null; workspace: Workspace | null; error: string | null }
 
 export interface Bootstrap {
-  me: User; workspace: Workspace; write_guard: GuardMode; demo_prefix: string; demo_tag: string; demo_team_id: number | null;
+  me: User; workspace: Workspace;
   teams: Team[]; issues: Issue[]; sub_issues: SubIssue[]; cycles: Cycle[]; projects: Project[]; users: User[]; server_time: string;
   /** False when Rally has no priority field on Features / Capabilities (D38). */
   project_priority: boolean; initiative_priority: boolean;

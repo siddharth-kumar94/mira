@@ -75,8 +75,7 @@ class IssueReads(RallyBase):
         demo = self.settings.rally_project or None
         teams.sort(key=lambda t: (t.id != demo, t.name.lower()))
         return Bootstrap(
-            me=me, workspace=workspace, write_guard=self.settings.write_guard, demo_prefix=self.settings.demo_prefix,
-            demo_tag=self.settings.demo_tag, demo_team_id=demo, teams=teams, issues=everything,
+            me=me, workspace=workspace, teams=teams, issues=everything,
             sub_issues=sub_issues, cycles=cycles, projects=projects, users=unique_users([me, *users]),
             server_time=self.now_stamp(now), project_priority=priority["feature"] is not None,
             initiative_priority=priority["capability"] is not None,

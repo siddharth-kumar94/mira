@@ -1,7 +1,6 @@
 from fastapi.testclient import TestClient
 
 from app.domain import BadRequest, Session, User
-from app.guard import GUARD_MESSAGE, GuardError
 from app.main import create_app, parse_ids
 from app.rally.client import RallyError
 from app.rally.mapping import initiative_from_rally, issue_from_rally, project_from_rally
@@ -64,8 +63,8 @@ def test_unexpected_value_error_is_a_logged_500(caplog):
 
 
 def test_session_routes_never_echo_the_key():
-    session = Session(connected=True, me=User(id=501, name="Dana Demo"), write_guard="demo")
-    adapter = FakeAdapter(session=session, connect=session, disconnect=Session(connected=False, write_guard="demo"))
+    session = Session(connected=True, me=User(id=501, name="Dana Demo"))
+    adapter = FakeAdapter(session=session, connect=session, disconnect=Session(connected=False))
     with client_for(adapter) as c:
         assert c.get("/api/session").json()["connected"] is True
         r = c.post("/api/session", json={"api_key": "_SECRET123"})
@@ -154,11 +153,9 @@ def test_portfolio_priority_patch_forwards_the_kind_and_only_a_priority():
     assert seen == [("project", "F201", 3), ("initiative", "C251", 0)]
 
 
-def test_guard_error_is_403_and_rally_errors_keep_status():
-    adapter = FakeAdapter(update_issue=GuardError(GUARD_MESSAGE), team_load=RallyError(404, "Team 1 was not found"))
+def test_rally_errors_keep_status():
+    adapter = FakeAdapter(team_load=RallyError(404, "Team 1 was not found"))
     with client_for(adapter) as c:
-        r = c.patch("/api/issues/1001", json={"estimate": 3})
-        assert r.status_code == 403 and r.json() == {"error": GUARD_MESSAGE}
         assert c.get("/api/teams/1").status_code == 404
 
 

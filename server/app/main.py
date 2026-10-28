@@ -12,7 +12,6 @@ from .domain import (BadRequest, Bootstrap, Burnup, Changes, Comment, CommentCre
                      IssueCreate, IssueDetail, IssuePage, IssuePatch, Label, PortfolioPatch, Project, ProjectDetail, ProjectList,
                      RankRequest, Release, SearchResult, Session, SessionCreate, SubIssue, SubIssueCreate, SubIssuePatch, TagCreate, TeamLoad,
                      Update, UpdateCreate, User)
-from .guard import GuardError, WriteGuard
 from .rally.adapter import RallyAdapter
 from .rally.client import RallyClient, RallyError
 
@@ -34,8 +33,7 @@ def build_adapter(settings: Settings) -> RallyAdapter:
                            max_concurrency=settings.rally_max_concurrency)
 
     key = read_key(settings.mira_credentials) or settings.rally_api_key  # spec D14: the app's key, else .env
-    guard = WriteGuard(settings.write_guard, settings.rally_project, settings.demo_prefix, settings.demo_tag)
-    return RallyAdapter(make_client(key), settings, guard, client_factory=make_client)
+    return RallyAdapter(make_client(key), settings, client_factory=make_client)
 
 
 def create_app(adapter=None) -> FastAPI:
@@ -51,11 +49,6 @@ def create_app(adapter=None) -> FastAPI:
     @app.exception_handler(RallyError)
     async def rally_error(_: Request, e: RallyError) -> JSONResponse:
         return JSONResponse({"error": e.message}, status_code=e.status)
-
-    @app.exception_handler(GuardError)
-    async def guard_error(request: Request, e: GuardError) -> JSONResponse:
-        log.warning("write guard blocked %s %s: %s", request.method, request.url.path, e)
-        return JSONResponse({"error": str(e)}, status_code=403)
 
     @app.exception_handler(BadRequest)
     async def bad_request(_: Request, e: BadRequest) -> JSONResponse:

@@ -23,7 +23,7 @@ The landing screen (`/my/assigned`): the stories assigned to you or created by y
 
 ## Driving it
 
-Preconditions: baseline. The real data is read-only with the guard on.
+Preconditions: baseline. Edits write to Rally, so use [DEMO] items.
 
 - **my-issues-focus**, **my-issues-priority**: → `rallypoc browser run focus` → PASS: group labels in Focus order, each sprint group named with its team.
 - **my-issues-scope**: → `rallypoc browser run my-issues` → PASS: rows from two teams, J/K move one visible selection.

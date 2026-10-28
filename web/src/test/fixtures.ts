@@ -50,8 +50,8 @@ export function makeSubIssue(over: Partial<SubIssue> = {}): SubIssue {
 /** Mine across two teams (1001 and 1002 in the demo team, 1201 in AI/ML), plus Sam's 1300, the parent of my sub-issue 4002. */
 export function makeBootstrap(over: Partial<Bootstrap> = {}): Bootstrap {
   return {
-    me: DANA, workspace: { id: 8001, name: "Demo Workspace" }, write_guard: "demo", demo_prefix: "[DEMO] ",
-    demo_tag: "collabathon-demo", demo_team_id: 9001, teams: [DEMO_TEAM, AIML],
+    me: DANA, workspace: { id: 8001, name: "Demo Workspace" },
+    teams: [DEMO_TEAM, AIML],
     issues: [
       makeIssue(),
       makeIssue({ id: 1002, key: "US1002", title: "[DEMO] Backlog one", status: "backlog", cycle_id: null, priority: 0, rank: "P~~~", description: "" }),

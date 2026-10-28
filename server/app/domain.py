@@ -12,7 +12,6 @@ HealthValue = Literal["on_track", "at_risk", "off_track", "no_target"]
 ReportedHealth = Literal["on_track", "at_risk", "off_track"]
 ProjectCategory = Literal["backlog", "planned", "started", "completed"]
 InitiativeStatus = Literal["planned", "active", "completed"]
-GuardMode = Literal["demo", "off"]
 
 
 class BadRequest(ValueError):
@@ -215,17 +214,12 @@ class Session(BaseModel):
     connected: bool
     me: User | None = None
     workspace: Workspace | None = None
-    write_guard: GuardMode
     error: str | None = None
 
 
 class Bootstrap(BaseModel):
     me: User
     workspace: Workspace
-    write_guard: GuardMode
-    demo_prefix: str
-    demo_tag: str
-    demo_team_id: int | None
     teams: list[Team]
     issues: list[Issue]
     sub_issues: list[SubIssue]

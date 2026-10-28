@@ -24,13 +24,13 @@ Nothing is deployed. The POC runs on one laptop and talks to the real Rally work
 |---|---|
 | Proxy (FastAPI, `server/`) | `uv run uvicorn app.main:app` on 127.0.0.1:8787 |
 | Web client (Vite, `web/`) | `npm run dev` on 127.0.0.1:5173, proxying `/api` |
-| Rally | The real Rally workspace via the key saved by the app (~/.config/mira/credentials) or RALLY_API_KEY in .env. `stack up` always starts the proxy with WRITE_GUARD=demo; `--write-guard off` is for live use, and the checks refuse to run with it |
+| Rally | The real Rally workspace via the key saved by the app (~/.config/mira/credentials) or RALLY_API_KEY in .env. The app has no write guard, so the checks touch only [DEMO] items |
 
 ## Launch
 
 ```bash
 $CC doctor          # tools, platform emulation, ports, other sessions' containers (leave those alone)
-$CC stack up        # proxy + web, guard on (demo); waits for /api/health and the web root
+$CC stack up        # proxy + web; waits for /api/health and the web root
 $CC seed            # resets the [DEMO] items in Rally (approved exception below)
 ```
 
@@ -40,10 +40,10 @@ Name your instance before anything that mutates: `export RALLY_POC_VERIFY_INSTAN
 
 | Need | Command |
 |---|---|
-| Call the proxy | `$CC api GET /api/bootstrap --expect 200 --field me.name` (POST, PATCH and DELETE require the write guard on and a connected proxy; the CLI refuses otherwise, and the request echo redacts `api_key`) |
+| Call the proxy | `$CC api GET /api/bootstrap --expect 200 --field me.name` (POST, PATCH and DELETE require a connected proxy; the CLI refuses otherwise, and the request echo redacts `api_key`) |
 | Phase 4 coverage | `check api` also reads sprints, features, capabilities and PI chips, round-trips a feature comment and priority (`pm-priority` skips without a portfolio priority field), and sends `not-a-key` to `POST /api/session` (401, still connected). `check ui` adds the flows `cycles` (the Sprints page), `projects` (Features), `project-update`, `project-across-teams`, `initiatives` (Capabilities), `settings` and `connect`; each writes only [DEMO] items and undoes it, and `connect` never clicks Disconnect. The `vocabulary` flow writes nothing: it visits My stories, a team's Stories, Sprints and Features (list, board, timeline), a feature, Capabilities, a capability and Settings › Preferences, and fails if the chrome (sidebar, header, tab strip, column headers, open Display and Filter menus) shows issue, sub-issue, cycle, project or initiative (the Capability list's "Initiative" grouping excepted). It saves the sidebar sections and the layout it changes and puts them back |
 | Wait for a value | `$CC api GET /api/health --field ok --until True` |
-| Live API checks (spec §12) | `$CC check api` (refuses unless the guard is on) |
+| Live API checks (spec §12) | `$CC check api` |
 | One browser flow / all flows | `$CC browser run my-issues` / `$CC check ui` |
 | Screenshot + accessibility tree | `$CC browser snapshot /` |
 | Logs | `$CC stack logs --service server` |

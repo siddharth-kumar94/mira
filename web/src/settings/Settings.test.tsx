@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "../App";
-import { Preferences } from "./Preferences";
 import { appStore, uiStore } from "../store";
 import { makeBootstrap, makeIssue, serve } from "../test/fixtures";
 import { expectRallyWords } from "../test/vocabulary";
@@ -15,7 +14,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 async function openSettings(section: "preferences" | "account" = "preferences", bootstrap = makeBootstrap()) {
-  const fetchMock = serve({ "GET /api/bootstrap": bootstrap, "DELETE /api/session": { connected: false, me: null, workspace: null, write_guard: "demo", error: null } });
+  const fetchMock = serve({ "GET /api/bootstrap": bootstrap, "DELETE /api/session": { connected: false, me: null, workspace: null, error: null } });
   render(<App />);
   await screen.findByRole("navigation", { name: "Main" });
   uiStore.getState().navigate({ name: "my", tab: "created" });
@@ -59,7 +58,7 @@ test("the nav: Personal (Preferences, Account), Administration (Teams), Your tea
 test("Preferences: Interface theme, Display names and a read-only Write guard row", async () => {
   await openSettings();
   expect(screen.getByRole("heading", { level: 1, name: "Preferences" })).toBeInTheDocument();
-  expect([...document.querySelectorAll("[data-part=row-title]")].map((t) => t.textContent)).toEqual(["Interface theme", "Display names", "Write guard"]);
+  expect([...document.querySelectorAll("[data-part=row-title]")].map((t) => t.textContent)).toEqual(["Interface theme", "Display names"]);
 
   fireEvent.click(within(row("Interface theme")).getByRole("button", { name: "Interface theme: Light" }));
   expect(screen.getAllByRole("menuitemcheckbox").map((m) => [m.textContent, m.getAttribute("aria-checked")])).toEqual([["Light", "true"], ["Dark", "false"]]);
@@ -70,32 +69,6 @@ test("Preferences: Interface theme, Display names and a read-only Write guard ro
 
   expect(row("Display names")).toHaveTextContent("Full name");
 
-  const guard = row("Write guard");
-  expect(guard).toHaveTextContent("Demo mode: only [DEMO] items change");
-  expect(guard).toHaveTextContent("Change it with rallypoc stack up");
-  // §11: nothing in the UI changes the write guard.
-  for (const role of ["button", "switch", "checkbox", "combobox", "textbox", "link", "menuitem"]) {
-    expect(within(guard).queryAllByRole(role), role).toEqual([]);
-  }
-});
-
-test("the Write guard row names the server's demo prefix", async () => {
-  await openSettings("preferences", makeBootstrap({ demo_prefix: "[SANDBOX] " }));
-  expect(row("Write guard")).toHaveTextContent("Demo mode: only [SANDBOX] items change");
-});
-
-test("before the bootstrap lands, the Write guard row claims no mode", async () => {
-  appStore.setState({ meta: null });
-  render(<Preferences />);
-  expect(row("Write guard")).not.toHaveTextContent("Demo mode");
-  expect(row("Write guard")).not.toHaveTextContent("Off");
-  expect(row("Write guard")).toHaveTextContent("Loading…");
-});
-
-test("with the guard off, the row says so", async () => {
-  await openSettings("preferences", makeBootstrap({ write_guard: "off" }));
-  expect(row("Write guard")).toHaveTextContent("Off: changes write to Rally");
-  expect(row("Write guard")).not.toHaveTextContent("Demo mode");
 });
 
 test("Account: connected as you, a masked key with Change key, and Disconnect", async () => {
@@ -140,7 +113,7 @@ test("Change key to another account: the dialog closes, a toast names it, and th
   const other = { id: 777, name: "Other Person" };
   const ws = { id: 8002, name: "Other WS" };
   serve({
-    "POST /api/session": { connected: true, me: other, workspace: ws, write_guard: "demo", error: null },
+    "POST /api/session": { connected: true, me: other, workspace: ws, error: null },
     "GET /api/bootstrap": makeBootstrap({ me: other, workspace: ws, teams: [], issues: [makeIssue({ id: 5001, key: "US5001", assignee: other, team_id: 9050 })], sub_issues: [], projects: [] }),
   });
   changeKey("synthetic-other-key");
@@ -167,7 +140,6 @@ test("the key field keeps password managers out: new-password, ignore hints, no 
 
 test("Preferences, in Rally's words", async () => {
   await openSettings();
-  expect(await screen.findByText("Demo mode: only [DEMO] items change")).toBeInTheDocument();
   expect(row("Display names")).toHaveTextContent("Full name");
   expectRallyWords(document.body);
 });

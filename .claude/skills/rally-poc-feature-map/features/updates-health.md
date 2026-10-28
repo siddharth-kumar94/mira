@@ -2,7 +2,7 @@
 
 Last verified: f064d7ee53a4 on 2026-10-20 (live)
 
-Feature and capability updates and the health they report: the Activity tab (Comment | Update composer over a feed), the "Latest update" card with its diff block, and the health chip shown in lists, boards, the timeline and capability rows. Health is the latest reported health, else Auto (calculated from the target date, progress and blocked stories) with "Auto" in the age slot (D36). Updates are stored as Rally ConversationPosts with a header, a body and a footer. Posting needs the `[DEMO] ` prefix, the demo team and the `collabathon-demo` tag with the guard on (D35). PMs use it. It lives in `web/src/pm/PmActivity.tsx`, `UpdateCard.tsx`, `diff.ts`, `health.ts` and `server/app/pm.py`. Overall: beta. Posting and removal were driven live; the capability never changes because the demo Features are not started, and the feed's spacing was not measured.
+Feature and capability updates and the health they report: the Activity tab (Comment | Update composer over a feed), the "Latest update" card with its diff block, and the health chip shown in lists, boards, the timeline and capability rows. Health is the latest reported health, else Auto (calculated from the target date, progress and blocked stories) with "Auto" in the age slot (D36). Updates are stored as Rally ConversationPosts with a header, a body and a footer. PMs use it. It lives in `web/src/pm/PmActivity.tsx`, `UpdateCard.tsx`, `diff.ts`, `health.ts` and `server/app/pm.py`. Overall: beta. Posting and removal were driven live; the capability never changes because the demo Features are not started, and the feed's spacing was not measured.
 
 ## Sub-features
 

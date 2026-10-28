@@ -9,21 +9,18 @@ from pathlib import Path
 APP = Path(__file__).resolve().parent.parent / "app"
 BANNED = re.compile(r"\b(sub-issues?|issues?|cycles?|projects?|initiatives?)\b", re.I)
 # Calls whose arguments become a message the user reads (toast, 403/404/422 body, health chip title).
-CALLS = {"GuardError", "BadRequest", "RallyError", "HTTPException", "ValueError", "_auto", "Health"}
+CALLS = {"BadRequest", "RallyError", "HTTPException", "ValueError", "_auto", "Health"}
 # Inside these, every string in the body is a phrase the user reads (minus the docstring).
 # Module-level constants that hold message text; SAFE entries may point to them as "scanned where defined".
-MESSAGE_CONSTANTS = {"GUARD_MESSAGE", "BURNUP_UNAVAILABLE", "NOT_CONNECTED"}
+MESSAGE_CONSTANTS = {"BURNUP_UNAVAILABLE", "NOT_CONNECTED"}
 PHRASE_FUNCS = {"_phrase", "activities_from_rally"}
 # Message pieces that are not literals but cannot carry a banned word, keyed by their source text.
 SAFE = {
     "e.status": "an HTTP status code, not text",
     "status": "an HTTP status code, not text",
-    "e.message": "a Rally or guard message that is itself scanned where it is raised",
-    "GUARD_MESSAGE": "a module constant, scanned where it is defined",
+    "e.message": "a Rally message that is itself scanned where it is raised",
     "BURNUP_UNAVAILABLE": "a module constant, scanned where it is defined",
     "NOT_CONNECTED": "a module constant, scanned where it is defined",
-    "self.prefix.strip()": "the configured [DEMO] prefix",
-    "self.tag": "the configured demo tag",
     "_FIELD_WORD.get(name, name)": "a field name mapped to Rally's word; the other names are not Linear nouns",
     "name": "a field or label name, never a Linear noun",
     "text.upper()": "the story or feature ID the user typed",
@@ -112,7 +109,6 @@ def test_scanner_catches_each_shape():
     def kinds(src):
         return {(t, k) for _, t, k in scan_source(src)}
 
-    assert ("a cycle", "banned") in kinds('raise GuardError("a cycle")')
     assert ("an issue", "banned") in kinds('raise BadRequest("an issue")')
     assert ("project x", "banned") in kinds('raise RallyError(404, "project x")')
     assert ("Sub-issue ", "banned") in kinds('raise RallyError(404, f"Sub-issue {i}")')
@@ -126,11 +122,11 @@ def test_scanner_catches_each_shape():
     assert ("kind", "unverified") in kinds('raise BadRequest(f"no {kind} here")')
     assert ("x.y", "unverified") in kinds("raise RallyError(404, x.y)")
     # a message constant is scanned where it is defined
-    src = 'GUARD_MESSAGE = "Demo mode: only [DEMO] issues can be edited"\nraise GuardError(GUARD_MESSAGE)'
-    assert ("Demo mode: only [DEMO] issues can be edited", "banned") in kinds(src)
-    assert kinds('GUARD_MESSAGE = "Demo mode: only [DEMO] items can be edited"\nraise GuardError(GUARD_MESSAGE)') == set()
+    src = 'BURNUP_UNAVAILABLE = "No burn-up for these issues"\nraise BadRequest(BURNUP_UNAVAILABLE)'
+    assert ("No burn-up for these issues", "banned") in kinds(src)
+    assert kinds('BURNUP_UNAVAILABLE = "No burn-up for these stories"\nraise BadRequest(BURNUP_UNAVAILABLE)') == set()
     assert ("a cycle ", "banned") in kinds('NOT_CONNECTED = f"a cycle {x}"')
     # allow-listed pieces and clean text pass; an identifier named after a banned word is not text
     assert kinds('raise BadRequest(f"no {len(rows)} here")') == set()
-    assert kinds('raise GuardError("a sprint of stories")') == set()
+    assert kinds('raise BadRequest("a sprint of stories")') == set()
     assert kinds("cycle_names = 1\nx = cycle_names") == set()

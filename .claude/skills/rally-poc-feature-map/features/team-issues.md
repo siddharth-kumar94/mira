@@ -22,7 +22,7 @@ A team's Stories screen (`/team/<id>/active`, `/backlog`, `/all`): the shared st
 
 1. In the sidebar under "Your teams", open a team's "Stories". It opens on "Active".
 2. Press ⌘B, or use the round Display button, to switch between List and Board. Use Display › Grouping to group by Assignee.
-3. "Backlog" shows the backlog in Rally's rank order. Drag a row to rank it (only [DEMO] rows with the guard on).
+3. "Backlog" shows the backlog in Rally's rank order. Drag a row to rank it.
 4. Select with X and the bulk bar appears at the bottom.
 
 ## Driving it
@@ -40,4 +40,3 @@ Preconditions: baseline, then `rallypoc seed`.
 - **A big team loads slowly.** AI/ML Solutions (569 stories) showed "Loading AI/ML Solutions…" for about 13 s on 2026-10-20 (`proxy-team-reads`). Data Services loads in 2.5 s.
 - **Active includes every Todo story, not only the sprint.** Todo means Defined with Ready on or in an iteration (spec §5.2), so AI/ML's Todo column held 173 stories (552 points), many in Sprints 4 to 6.
 - **No assignee is Linear's wording.** The spec called the group "Unassigned"; Mira shows "No assignee".
-- **Real stories are read-only with the guard on.** Dragging or editing one answers 403 and rolls the change back (`server/app/guard.py:25`). The dry run did not try it on real data.

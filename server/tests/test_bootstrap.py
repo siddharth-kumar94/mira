@@ -41,7 +41,7 @@ async def test_bootstrap_is_workspace_wide_and_lists_your_teams():
     assert [s.id for s in b.sub_issues] == [4002]
     assert [cy.id for cy in b.cycles] == [301] and [p.key for p in b.projects] == ["F201"]
     assert [u.name for u in b.users] == ["Dana Demo", "Sam Sample"]
-    assert b.demo_team_id == PROJECT_ID and b.write_guard == "demo"
+    assert PROJECT_ID in [t.id for t in b.teams]
     assert b.server_time == "2026-10-16T11:59:30.000Z"
     mine = next(call for call in c.queries("/artifact") if "ScheduleState <" in call[2]["query"])[2]
     assert "project" not in mine and mine["workspace"] == f"/workspace/{WORKSPACE_ID}"

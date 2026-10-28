@@ -36,7 +36,7 @@ test("the dialog: team chip, New story, Close; title and description; seven chip
   expect(dialog.className).toContain("rounded-(--radius-composer)");
   expect(within(dialog).getByRole("button", { name: "Set team" })).toHaveTextContent("Data Services");
   expect(within(dialog).getByText("New story")).toBeInTheDocument();
-  expect(within(dialog).getByRole("textbox", { name: "Story title" })).toHaveValue("[DEMO] ");
+  expect(within(dialog).getByRole("textbox", { name: "Story title" })).toHaveValue("");
   expect(within(dialog).getByRole("textbox", { name: "Story description" })).toHaveAttribute("placeholder", "Add description…");
   expect(within(dialog).getAllByRole("button", { name: /^(Change|Add to sprint)/ }).map((b) => b.getAttribute("aria-label")?.split(".")[0]))
     .toEqual(["Change status", "Change priority", "Change assignee", "Change feature", "Change estimate", "Change labels", "Add to sprint"]);
@@ -74,14 +74,14 @@ test("a chip opens its picker under it; choosing sets the value; numbers pick", 
   expect(chip(/^Change estimate/)).toHaveTextContent("5 Points");
 });
 
-test("Create stays disabled until the title says more than the prefix", () => {
+test("Create stays disabled until the title says something", () => {
   openIn({ name: "team", teamId: 9001, tab: "active" });
   render(<Composer />);
   const create = screen.getByRole("button", { name: "Create story" });
   expect(create).toBeDisabled();
-  fireEvent.change(screen.getByLabelText("Story title"), { target: { value: "No prefix" } });
+  fireEvent.change(screen.getByLabelText("Story title"), { target: { value: "   " } });
   expect(create).toBeDisabled();
-  fireEvent.change(screen.getByLabelText("Story title"), { target: { value: "[DEMO] Fine" } });
+  fireEvent.change(screen.getByLabelText("Story title"), { target: { value: "Fine" } });
   expect(create).toBeEnabled();
 });
 
@@ -107,19 +107,20 @@ test("Create more keeps it open with the same team and chips, and a fresh title"
   fireEvent.click(screen.getByRole("switch", { name: "Create more" }));
   fireEvent.change(screen.getByLabelText("Story title"), { target: { value: "[DEMO] New one" } });
   fireEvent.click(screen.getByRole("button", { name: "Create story" }));
-  await waitFor(() => expect(screen.getByLabelText("Story title")).toHaveValue("[DEMO] "));
+  await waitFor(() => expect(screen.getByLabelText("Story title")).toHaveValue(""));
   expect(uiStore.getState().composerOpen).toBe(true);
   expect(chip(/^Change feature/)).toHaveTextContent("[DEMO] Feature A");
 });
 
-test("a team with no features says so in Rally's words, and only once the team has loaded", async () => {
+test("a team with no open features says so in Rally's words, and only once the team has loaded", async () => {
+  appStore.setState((s) => ({ projects: { ...s.projects, 202: { ...s.projects[202], status_category: "completed" } } })); // the team's only feature is done
   act(() => {
     uiStore.getState().navigate({ name: "my", tab: "assigned" });
     uiStore.getState().openComposer({ teamId: 9002 });
   });
   render(<Composer />);
-  expect(screen.queryByText(/no \[DEMO\] features/)).toBeNull(); // not before the load answers
-  expect(await screen.findByText("This team has no [DEMO] features to add stories to.")).toBeInTheDocument();
+  expect(screen.queryByText(/no open features/)).toBeNull(); // not before the load answers
+  expect(await screen.findByText("This team has no open features to add stories to.")).toBeInTheDocument();
   expectRallyWords(document.body);
   expect(screen.queryByText(/Rally/)).toBeNull();
 });
@@ -184,10 +185,3 @@ test("typing two letters in the assignee list searches the whole workspace (D16)
   expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/users")).map(([url]) => String(url))).toEqual(["/api/users?q=pat"]);
 });
 
-test("typing starts after the [DEMO] prefix: the caret opens at the end of the title", () => {
-  openIn({ name: "team", teamId: 9001, tab: "active" });
-  render(<Composer />);
-  const title = screen.getByLabelText<HTMLTextAreaElement>("Story title");
-  expect(title).toHaveValue("[DEMO] ");
-  expect([title.selectionStart, title.selectionEnd]).toEqual([7, 7]);
-});
